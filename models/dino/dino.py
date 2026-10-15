@@ -60,6 +60,39 @@ def apply_activation_gating(
     return gated
 
 
+def apply_length_adaptive_ctc_bias(
+    probabilities,
+    predicted_log_length,
+    bias_scale=0.0,
+    max_bias=1.0,
+):
+    """Adjust blank/nonblank log odds from a sample-level predicted length."""
+    if predicted_log_length is None or float(bias_scale) == 0.0:
+        zero = probabilities.new_zeros(probabilities.shape[0])
+        return probabilities, zero
+    if probabilities.dim() != 3 or probabilities.shape[-1] < 2:
+        raise ValueError("probabilities must have shape [B, Q, C] with C >= 2")
+    if float(bias_scale) < 0:
+        raise ValueError("bias_scale must be non-negative")
+    if float(max_bias) < 0:
+        raise ValueError("max_bias must be non-negative")
+
+    predicted_log_length = predicted_log_length.reshape(-1).to(probabilities)
+    if predicted_log_length.shape[0] != probabilities.shape[0]:
+        raise ValueError("predicted_log_length batch size does not match probabilities")
+
+    expected_nonblank = probabilities[:, :, 1:].sum(dim=-1).sum(dim=-1)
+    expected_log_length = torch.log1p(expected_nonblank.detach().clamp(min=0.0))
+    adaptive_bias = float(bias_scale) * (predicted_log_length - expected_log_length)
+    adaptive_bias = adaptive_bias.clamp(min=-float(max_bias), max=float(max_bias))
+
+    log_probs = torch.log(probabilities.clamp(min=1e-8))
+    adjusted = log_probs.clone()
+    adjusted[:, :, :1] = adjusted[:, :, :1] - adaptive_bias[:, None, None]
+    adjusted[:, :, 1:] = adjusted[:, :, 1:] + adaptive_bias[:, None, None]
+    return adjusted.softmax(dim=-1), adaptive_bias
+
+
 def compute_query_count_loss(activation_logits, target_lengths, short_weight=1.0):
     activation = torch.sigmoid(activation_logits)
     if activation.dim() == 3 and activation.shape[-1] == 1:
@@ -72,6 +105,144 @@ def compute_query_count_loss(activation_logits, target_lengths, short_weight=1.0
         weights[target_lengths <= 2.0] = short_weight
         loss = loss * weights
     return loss.mean(), expected_count
+
+
+def compute_ctc_collapsed_count_loss(
+    probabilities,
+    target_lengths,
+    short_weight=1.0,
+):
+    """Match the expected greedy-CTC collapsed length to the transcript length."""
+    if probabilities.dim() != 3 or probabilities.shape[-1] < 2:
+        raise ValueError("probabilities must have shape [B, Q, C] with C >= 2")
+    if probabilities.shape[1] == 0:
+        raise ValueError("probabilities must contain at least one query")
+
+    nonblank = probabilities[:, :, 1:]
+    expected_count = nonblank[:, 0].sum(dim=-1)
+    if nonblank.shape[1] > 1:
+        # A nonblank token is emitted when its current class differs from the
+        # preceding raw CTC token. This models the unpadded greedy decoder used
+        # at inference rather than the blank-interleaved training sequence.
+        expected_count = expected_count + (
+            nonblank[:, 1:] * (1.0 - nonblank[:, :-1])
+        ).sum(dim=(-1, -2))
+
+    target_lengths = target_lengths.to(expected_count).float().clamp(min=1.0)
+    if target_lengths.numel() != expected_count.numel():
+        raise ValueError("target_lengths batch size does not match probabilities")
+    count_ratio = expected_count / target_lengths
+    loss = F.smooth_l1_loss(
+        count_ratio,
+        torch.ones_like(count_ratio),
+        reduction="none",
+    )
+    if short_weight > 1.0:
+        weights = torch.ones_like(loss)
+        weights[target_lengths <= 2.0] = float(short_weight)
+        loss = loss * weights
+    return loss.mean(), expected_count
+
+
+def soft_sort_permutation(scores, temperature):
+    """Return the SoftSort row-stochastic relaxation of ascending argsort."""
+    if scores.dim() != 2:
+        raise ValueError("scores must have shape [B, Q]")
+    if scores.shape[1] == 0:
+        raise ValueError("scores must contain at least one query")
+    if float(temperature) <= 0.0:
+        raise ValueError("temperature must be positive")
+    sorted_scores = torch.sort(scores, dim=-1).values
+    distances = (sorted_scores.unsqueeze(-1) - scores.unsqueeze(-2)).abs()
+    return torch.softmax(-distances / float(temperature), dim=-1)
+
+
+def compute_transcript_guided_soft_order_loss(
+    unsorted_ctc_probs,
+    pred_boxes,
+    targets,
+    temperature=0.01,
+):
+    """Use transcript CTC as a soft-sort surrogate for query box ordering."""
+    if unsorted_ctc_probs.dim() != 3 or unsorted_ctc_probs.shape[-1] < 2:
+        raise ValueError("unsorted_ctc_probs must have shape [B, Q, C] with C >= 2")
+    if pred_boxes.shape[:2] != unsorted_ctc_probs.shape[:2]:
+        raise ValueError("pred_boxes and unsorted_ctc_probs must share [B, Q]")
+    if len(targets) != unsorted_ctc_probs.shape[0]:
+        raise ValueError("targets batch size does not match probabilities")
+
+    losses = []
+    entropies = []
+    for batch_idx, target in enumerate(targets):
+        target_labels = target["labels"].long()
+        if target_labels.numel() == 0:
+            continue
+        direction = target.get("direction")
+        if torch.is_tensor(direction):
+            direction = int(direction.item())
+        sort_axis = 1 if direction is not None and int(direction) == 1 else 0
+
+        permutation = soft_sort_permutation(
+            pred_boxes[batch_idx : batch_idx + 1, :, sort_axis],
+            temperature,
+        )[0]
+        unique_labels = torch.unique(target_labels, sorted=True)
+        selected_indices = torch.cat(
+            (
+                unique_labels.new_zeros(1),
+                unique_labels + 1,
+            )
+        )
+        selected_probs = unsorted_ctc_probs[batch_idx].detach().index_select(
+            -1, selected_indices
+        )
+        other_prob = (1.0 - selected_probs.sum(dim=-1, keepdim=True)).clamp(min=0.0)
+        local_probs = torch.cat((selected_probs, other_prob), dim=-1)
+        soft_sorted_probs = permutation.matmul(local_probs).clamp(min=1e-8)
+        soft_sorted_probs = soft_sorted_probs / soft_sorted_probs.sum(
+            dim=-1, keepdim=True
+        )
+
+        padded_probs = soft_sorted_probs.new_zeros(
+            soft_sorted_probs.shape[0] * 2,
+            soft_sorted_probs.shape[1],
+        )
+        padded_probs[::2] = soft_sorted_probs
+        padded_probs[1::2, 0] = 1.0
+
+        local_targets = (
+            (target_labels[:, None] == unique_labels[None, :])
+            .to(torch.int64)
+            .argmax(dim=-1)
+            + 1
+        )
+        input_lengths = torch.tensor(
+            [padded_probs.shape[0]], device=padded_probs.device, dtype=torch.long
+        )
+        target_lengths = torch.tensor(
+            [local_targets.numel()], device=padded_probs.device, dtype=torch.long
+        )
+        losses.append(
+            F.ctc_loss(
+                padded_probs.log().unsqueeze(1),
+                local_targets.unsqueeze(0),
+                input_lengths,
+                target_lengths,
+                blank=0,
+                reduction="mean",
+                zero_infinity=True,
+            )
+        )
+        entropies.append(
+            -(permutation * permutation.clamp(min=1e-8).log()).sum(-1).mean()
+        )
+
+    if not losses:
+        zero = pred_boxes.sum() * 0.0
+        return zero, {"permutation_entropy": zero.detach()}
+    return torch.stack(losses).mean(), {
+        "permutation_entropy": torch.stack(entropies).mean().detach()
+    }
 
 
 def compute_query_budget_loss(
@@ -148,6 +319,48 @@ class QuerySequenceRefiner(nn.Module):
             x = layer["ffn"](x)
             refined = residual + x
         return refined
+
+
+class VerticalGeometryQueryAdapter(nn.Module):
+    """Inject sorted-query geometry through a zero-start residual branch."""
+
+    def __init__(self, hidden_dim, geometry_hidden_dim=64, init_scale=0.0):
+        super().__init__()
+        hidden_dim = int(hidden_dim)
+        geometry_hidden_dim = int(geometry_hidden_dim)
+        if geometry_hidden_dim < 1:
+            raise ValueError("geometry_hidden_dim must be >= 1")
+        self.geometry_mlp = nn.Sequential(
+            nn.Linear(4, geometry_hidden_dim),
+            nn.GELU(),
+            nn.Linear(geometry_hidden_dim, hidden_dim),
+        )
+        self.residual_scale = nn.Parameter(torch.tensor(float(init_scale)))
+
+    @staticmethod
+    def geometry_features(sorted_boxes, axis=1):
+        axis = int(axis)
+        if axis not in (0, 1):
+            raise ValueError("axis must be 0 (horizontal) or 1 (vertical)")
+        center = sorted_boxes[:, :, axis]
+        extent = sorted_boxes[:, :, axis + 2].clamp(min=1e-4)
+
+        prev_gap = torch.zeros_like(center)
+        next_gap = torch.zeros_like(center)
+        if center.shape[1] > 1:
+            pair_gap = center[:, 1:] - center[:, :-1]
+            pair_extent = 0.5 * (extent[:, 1:] + extent[:, :-1])
+            normalized_gap = (pair_gap / pair_extent.clamp(min=1e-4)).clamp(0.0, 4.0)
+            prev_gap[:, 1:] = normalized_gap
+            next_gap[:, :-1] = normalized_gap
+
+        return torch.stack((center, extent, prev_gap, next_gap), dim=-1)
+
+    def forward(self, sorted_query_feats, sorted_boxes, axis=1):
+        geometry = self.geometry_features(sorted_boxes, axis=axis)
+        geometry_delta = self.geometry_mlp(geometry)
+        scale = torch.tanh(self.residual_scale)
+        return sorted_query_feats + scale * geometry_delta
 
 
 def compute_short_query_ce_loss(char_probs, targets, max_len=0, gamma=0.0):
@@ -404,6 +617,12 @@ class DINO(nn.Module):
         sorted_ctc_refiner_kernel=3,
         sorted_ctc_refiner_dropout=0.0,
         sorted_ctc_refiner_axis=1,
+        use_vertical_geometry_adapter=False,
+        vertical_geometry_adapter_hidden_dim=64,
+        vertical_geometry_adapter_axis=1,
+        vertical_geometry_adapter_init_scale=0.0,
+        use_ctc_length_calibration=False,
+        ctc_length_init=8.0,
     ):
         """Initializes the model.
         Parameters:
@@ -442,6 +661,18 @@ class DINO(nn.Module):
         self.sorted_ctc_refiner_kernel = int(sorted_ctc_refiner_kernel)
         self.sorted_ctc_refiner_dropout = float(sorted_ctc_refiner_dropout)
         self.sorted_ctc_refiner_axis = int(sorted_ctc_refiner_axis)
+        self.use_vertical_geometry_adapter = bool(use_vertical_geometry_adapter)
+        self.vertical_geometry_adapter_hidden_dim = int(
+            vertical_geometry_adapter_hidden_dim
+        )
+        self.vertical_geometry_adapter_axis = int(vertical_geometry_adapter_axis)
+        self.vertical_geometry_adapter_init_scale = float(
+            vertical_geometry_adapter_init_scale
+        )
+        self.use_ctc_length_calibration = bool(use_ctc_length_calibration)
+        self.ctc_length_init = float(ctc_length_init)
+        if self.ctc_length_init < 0:
+            raise ValueError("ctc_length_init must be non-negative")
 
         # setting query dim
         self.query_dim = query_dim
@@ -608,6 +839,28 @@ class DINO(nn.Module):
                 dropout=self.sorted_ctc_refiner_dropout,
             )
             torch.set_rng_state(torch_rng_state)
+        if self.use_vertical_geometry_adapter:
+            torch_rng_state = torch.get_rng_state()
+            self.vertical_geometry_adapter = VerticalGeometryQueryAdapter(
+                hidden_dim,
+                geometry_hidden_dim=self.vertical_geometry_adapter_hidden_dim,
+                init_scale=self.vertical_geometry_adapter_init_scale,
+            )
+            torch.set_rng_state(torch_rng_state)
+        if self.use_ctc_length_calibration:
+            torch_rng_state = torch.get_rng_state()
+            self.ctc_length_embed = nn.Sequential(
+                nn.LayerNorm(hidden_dim * 2),
+                nn.Linear(hidden_dim * 2, hidden_dim),
+                nn.GELU(),
+                nn.Linear(hidden_dim, 1),
+            )
+            nn.init.zeros_(self.ctc_length_embed[-1].weight)
+            nn.init.constant_(
+                self.ctc_length_embed[-1].bias,
+                math.log1p(self.ctc_length_init),
+            )
+            torch.set_rng_state(torch_rng_state)
 
     def _reset_parameters(self):
         # init input_proj
@@ -747,11 +1000,14 @@ class DINO(nn.Module):
             )
         out = {"pred_logits": outputs_class[-1], "pred_boxes": outputs_coord_list[-1]}
         if (
-            self.use_sorted_ctc_refiner
+            (self.use_sorted_ctc_refiner or self.use_vertical_geometry_adapter)
             and dn_meta is None
             and hs[-1].shape[:2] == outputs_coord_list[-1].shape[:2]
         ):
-            sort_axis = 1 if self.sorted_ctc_refiner_axis == 1 else 0
+            if self.use_vertical_geometry_adapter:
+                sort_axis = 1 if self.vertical_geometry_adapter_axis == 1 else 0
+            else:
+                sort_axis = 1 if self.sorted_ctc_refiner_axis == 1 else 0
             _, sorted_idx = torch.sort(
                 outputs_coord_list[-1][:, :, sort_axis],
                 dim=1,
@@ -762,7 +1018,21 @@ class DINO(nn.Module):
                 1,
                 sorted_idx.unsqueeze(-1).expand(-1, -1, hs[-1].shape[-1]),
             )
-            refined_sorted_query_hs = self.sorted_ctc_refiner(sorted_query_hs)
+            sorted_boxes = torch.gather(
+                outputs_coord_list[-1],
+                1,
+                sorted_idx.unsqueeze(-1).expand(-1, -1, 4),
+            )
+            if self.use_vertical_geometry_adapter:
+                sorted_query_hs = self.vertical_geometry_adapter(
+                    sorted_query_hs,
+                    sorted_boxes,
+                    axis=sort_axis,
+                )
+            if self.use_sorted_ctc_refiner:
+                refined_sorted_query_hs = self.sorted_ctc_refiner(sorted_query_hs)
+            else:
+                refined_sorted_query_hs = sorted_query_hs
             out["pred_sorted_ctc_logits"] = self.class_embed[-1](refined_sorted_query_hs)
         if self.use_query_activation_head:
             out["pred_activation_logits"] = self.query_activation_embed(final_query_hs)
@@ -783,6 +1053,12 @@ class DINO(nn.Module):
             out["pred_proto_logits"] = proto_logits
         if self.use_direction_head:
             out["pred_direction"] = self.direction_embed(final_query_hs.mean(dim=1))
+        if self.use_ctc_length_calibration:
+            pooled_queries = torch.cat(
+                (final_query_hs.mean(dim=1), final_query_hs.amax(dim=1)),
+                dim=-1,
+            )
+            out["pred_log_length"] = self.ctc_length_embed(pooled_queries).squeeze(-1)
         if self.aux_loss:
             out["aux_outputs"] = self._set_aux_loss(outputs_class, outputs_coord_list)
 
@@ -864,6 +1140,8 @@ class SetCriterion(nn.Module):
         CTC=False,
         ctc_blank_max=1.0,
         ctc_count_loss_short_weight=1.0,
+        ctc_collapsed_count_loss_short_weight=1.0,
+        ctc_soft_order_temperature=0.01,
         short_gt_presence_max_len=0,
         short_gt_presence_margin=0.0,
         short_gt_ce_max_len=0,
@@ -884,6 +1162,9 @@ class SetCriterion(nn.Module):
         ctc_viterbi_loss_blank_weight=0.0,
         ctc_viterbi_loss_nonblank_weight=1.0,
         ctc_viterbi_loss_max_len=0,
+        use_ctc_length_calibration=False,
+        ctc_length_bias_scale=0.0,
+        ctc_length_bias_max=1.0,
     ):
         """Create the criterion.
         Parameters:
@@ -902,6 +1183,12 @@ class SetCriterion(nn.Module):
         self.CTC = CTC
         self.ctc_blank_max = float(ctc_blank_max)
         self.ctc_count_loss_short_weight = float(ctc_count_loss_short_weight)
+        self.ctc_collapsed_count_loss_short_weight = float(
+            ctc_collapsed_count_loss_short_weight
+        )
+        self.ctc_soft_order_temperature = float(ctc_soft_order_temperature)
+        if self.ctc_soft_order_temperature <= 0.0:
+            raise ValueError("ctc_soft_order_temperature must be positive")
         self.short_gt_presence_max_len = int(short_gt_presence_max_len)
         self.short_gt_presence_margin = float(short_gt_presence_margin)
         self.short_gt_ce_max_len = int(short_gt_ce_max_len)
@@ -922,9 +1209,19 @@ class SetCriterion(nn.Module):
         self.ctc_viterbi_loss_blank_weight = float(ctc_viterbi_loss_blank_weight)
         self.ctc_viterbi_loss_nonblank_weight = float(ctc_viterbi_loss_nonblank_weight)
         self.ctc_viterbi_loss_max_len = int(ctc_viterbi_loss_max_len)
+        self.use_ctc_length_calibration = bool(use_ctc_length_calibration)
+        self.ctc_length_bias_scale = float(ctc_length_bias_scale)
+        self.ctc_length_bias_max = float(ctc_length_bias_max)
+        if self.ctc_length_bias_max < 0:
+            raise ValueError("ctc_length_bias_max must be non-negative")
         self.direction_loss_enabled = "loss_direction" in self.weight_dict
         self.ctc_count_loss_enabled = "loss_ctc_count" in self.weight_dict
+        self.ctc_collapsed_count_loss_enabled = (
+            "loss_ctc_collapsed_count" in self.weight_dict
+        )
+        self.ctc_soft_order_loss_enabled = "loss_ctc_soft_order" in self.weight_dict
         self.ctc_viterbi_loss_enabled = "loss_ctc_viterbi" in self.weight_dict
+        self.ctc_length_loss_enabled = "loss_ctc_length" in self.weight_dict
         self.glyph_proto_aux_enabled = "loss_glyph_proto_aux" in self.weight_dict
         self.short_gt_presence_enabled = "loss_short_gt_presence" in self.weight_dict
         self.short_gt_ce_enabled = "loss_short_gt_ce" in self.weight_dict
@@ -1013,7 +1310,7 @@ class SetCriterion(nn.Module):
             idx_list.append(idx_i)
         idx = torch.stack(idx_list, dim=0)
 
-        if self.use_sorted_ctc_refiner and "pred_sorted_ctc_logits" in outputs:
+        if "pred_sorted_ctc_logits" in outputs:
             sorted_by_x_pred_logits = outputs["pred_sorted_ctc_logits"]
         else:
             sorted_by_x_pred_logits = torch.gather(
@@ -1046,6 +1343,24 @@ class SetCriterion(nn.Module):
             / sorted_by_x_pred_logits[mask].sum(-1).unsqueeze(-1)
         )
 
+        if self.ctc_soft_order_loss_enabled:
+            unsorted_ctc_probs = torch.zeros_like(new_pred_logits).scatter(
+                1,
+                idx.unsqueeze(-1).expand_as(new_pred_logits),
+                new_pred_logits,
+            )
+            soft_order_loss, soft_order_stats = (
+                compute_transcript_guided_soft_order_loss(
+                    unsorted_ctc_probs,
+                    pred_boxes_topk,
+                    targets,
+                    temperature=self.ctc_soft_order_temperature,
+                )
+            )
+        else:
+            soft_order_loss = None
+            soft_order_stats = None
+
         # Optional anti-collapse control: cap blank probability so decode is less
         # likely to become empty on vertical long lines.
         if 0.0 < self.ctc_blank_max < 1.0:
@@ -1075,6 +1390,16 @@ class SetCriterion(nn.Module):
                 activation_gate_nonblank_coef=self.activation_gate_nonblank_coef,
             )
             new_pred_logits = gated_log_probs.softmax(-1)
+
+        adaptive_length_bias = new_pred_logits.new_zeros(new_pred_logits.shape[0])
+        predicted_log_length = outputs.get("pred_log_length")
+        if self.use_ctc_length_calibration and predicted_log_length is not None:
+            new_pred_logits, adaptive_length_bias = apply_length_adaptive_ctc_bias(
+                new_pred_logits,
+                predicted_log_length,
+                bias_scale=self.ctc_length_bias_scale,
+                max_bias=self.ctc_length_bias_max,
+            )
         
         
         blank_tensor = torch.zeros_like(new_pred_logits) + 1e-5
@@ -1123,6 +1448,25 @@ class SetCriterion(nn.Module):
         blank_pred_ratio = (new_pred_logits.argmax(-1) == 0).float().mean()
         losses = {"loss_CTC": loss, "blank_pred_ratio": blank_pred_ratio.detach()}
 
+        if soft_order_loss is not None:
+            losses["loss_ctc_soft_order"] = soft_order_loss
+            losses["ctc_soft_order_entropy"] = soft_order_stats[
+                "permutation_entropy"
+            ]
+
+        if self.ctc_length_loss_enabled and predicted_log_length is not None:
+            target_log_length = torch.log1p(
+                length_input.to(device=device, dtype=pred_logits.dtype)
+            )
+            losses["loss_ctc_length"] = F.smooth_l1_loss(
+                predicted_log_length.reshape(-1),
+                target_log_length,
+            )
+            losses["ctc_predicted_length"] = torch.expm1(
+                predicted_log_length.detach().clamp(min=0.0)
+            ).mean()
+            losses["ctc_adaptive_bias"] = adaptive_length_bias.detach().mean()
+
         if self.query_count_loss_enabled and activation_logits is not None:
             query_count_loss, expected_activation_count = compute_query_count_loss(
                 activation_logits,
@@ -1149,6 +1493,20 @@ class SetCriterion(nn.Module):
             losses["loss_ctc_count"] = count_loss.mean()
             losses["ctc_expected_count"] = expected_nonblank_count.detach().mean()
             losses["ctc_target_count"] = target_count.detach().mean()
+
+        if self.ctc_collapsed_count_loss_enabled:
+            collapsed_count_loss, expected_collapsed_count = (
+                compute_ctc_collapsed_count_loss(
+                    new_pred_logits,
+                    length_input,
+                    short_weight=self.ctc_collapsed_count_loss_short_weight,
+                )
+            )
+            losses["loss_ctc_collapsed_count"] = collapsed_count_loss
+            losses["ctc_expected_collapsed_count"] = (
+                expected_collapsed_count.detach().mean()
+            )
+            losses["ctc_collapsed_target_count"] = length_input.float().detach().mean()
 
         if self.ctc_viterbi_loss_enabled:
             unpadded_log_probs = torch.log(new_pred_logits.permute(1, 0, 2))
@@ -1844,6 +2202,22 @@ def build_dino(args):
         sorted_ctc_refiner_kernel=getattr(args, "sorted_ctc_refiner_kernel", 3),
         sorted_ctc_refiner_dropout=getattr(args, "sorted_ctc_refiner_dropout", 0.0),
         sorted_ctc_refiner_axis=getattr(args, "sorted_ctc_refiner_axis", 1),
+        use_vertical_geometry_adapter=getattr(
+            args, "use_vertical_geometry_adapter", False
+        ),
+        vertical_geometry_adapter_hidden_dim=getattr(
+            args, "vertical_geometry_adapter_hidden_dim", 64
+        ),
+        vertical_geometry_adapter_axis=getattr(
+            args, "vertical_geometry_adapter_axis", 1
+        ),
+        vertical_geometry_adapter_init_scale=getattr(
+            args, "vertical_geometry_adapter_init_scale", 0.0
+        ),
+        use_ctc_length_calibration=getattr(
+            args, "use_ctc_length_calibration", False
+        ),
+        ctc_length_init=getattr(args, "ctc_length_init", 8.0),
     )
     if args.masks:
         model = DETRsegm(model, freeze_detr=(args.frozen_weights is not None))
@@ -1903,9 +2277,20 @@ def build_dino(args):
     ctc_count_loss_coef = getattr(args, "ctc_count_loss_coef", 0.0)
     if ctc_count_loss_coef > 0:
         weight_dict["loss_ctc_count"] = ctc_count_loss_coef
+    ctc_collapsed_count_loss_coef = getattr(
+        args, "ctc_collapsed_count_loss_coef", 0.0
+    )
+    if ctc_collapsed_count_loss_coef > 0:
+        weight_dict["loss_ctc_collapsed_count"] = ctc_collapsed_count_loss_coef
+    ctc_soft_order_loss_coef = getattr(args, "ctc_soft_order_loss_coef", 0.0)
+    if ctc_soft_order_loss_coef > 0:
+        weight_dict["loss_ctc_soft_order"] = ctc_soft_order_loss_coef
     ctc_viterbi_loss_coef = getattr(args, "ctc_viterbi_loss_coef", 0.0)
     if ctc_viterbi_loss_coef > 0:
         weight_dict["loss_ctc_viterbi"] = ctc_viterbi_loss_coef
+    ctc_length_loss_coef = getattr(args, "ctc_length_loss_coef", 0.0)
+    if getattr(args, "use_ctc_length_calibration", False) and ctc_length_loss_coef > 0:
+        weight_dict["loss_ctc_length"] = ctc_length_loss_coef
     short_gt_presence_loss_coef = getattr(args, "short_gt_presence_loss_coef", 0.0)
     if short_gt_presence_loss_coef > 0:
         weight_dict["loss_short_gt_presence"] = short_gt_presence_loss_coef
@@ -1939,6 +2324,10 @@ def build_dino(args):
         CTC=getattr(args, "mode_chr", False),
         ctc_blank_max=getattr(args, "ctc_blank_max", 1.0),
         ctc_count_loss_short_weight=getattr(args, "ctc_count_loss_short_weight", 1.0),
+        ctc_collapsed_count_loss_short_weight=getattr(
+            args, "ctc_collapsed_count_loss_short_weight", 1.0
+        ),
+        ctc_soft_order_temperature=getattr(args, "ctc_soft_order_temperature", 0.01),
         short_gt_presence_max_len=getattr(args, "short_gt_presence_max_len", 0),
         short_gt_presence_margin=getattr(args, "short_gt_presence_margin", 0.0),
         short_gt_ce_max_len=getattr(args, "short_gt_ce_max_len", 0),
@@ -1959,6 +2348,11 @@ def build_dino(args):
         ctc_viterbi_loss_blank_weight=getattr(args, "ctc_viterbi_loss_blank_weight", 0.0),
         ctc_viterbi_loss_nonblank_weight=getattr(args, "ctc_viterbi_loss_nonblank_weight", 1.0),
         ctc_viterbi_loss_max_len=getattr(args, "ctc_viterbi_loss_max_len", 0),
+        use_ctc_length_calibration=getattr(
+            args, "use_ctc_length_calibration", False
+        ),
+        ctc_length_bias_scale=getattr(args, "ctc_length_bias_scale", 0.0),
+        ctc_length_bias_max=getattr(args, "ctc_length_bias_max", 1.0),
     )
     criterion.to(device)
     postprocessors = {

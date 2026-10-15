@@ -1,14 +1,27 @@
-cython
-pycocotools
-git+https://github.com/cocodataset/panopticapi.git#egg=panopticapi
-scipy
-termcolor
-addict
-yapf
-timm
-scikit-image
-opencv-python
-pandas
-wandb
-pytorch-ignite
-editdistance
+# Core SAQT runtime
+torch>=2.0
+torchvision>=0.15
+numpy>=1.23
+scipy>=1.9
+Pillow>=9.0
+
+# Query transformer / training utilities
+timm>=0.6
+cython>=0.29
+pycocotools>=2.0
+addict>=2.4
+yapf>=0.32
+termcolor>=2.0
+pytorch-ignite>=0.4
+wandb>=0.15
+tensorboard>=2.10
+
+# Evaluation and visualization
+editdistance>=0.6
+matplotlib>=3.6
+opencv-python>=4.7
+
+# Notes:
+# - Install torch/torchvision with the CUDA wheel matching the target machine.
+# - MMOCR, PaddleOCR, and text_renderer comparison/generation tools use their
+#   own external environments and are not part of this base SAQT dependency set.

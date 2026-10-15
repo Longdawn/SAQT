@@ -1,6 +1,263 @@
 # Codex Handoff
 
-Last updated: 2026-06-09
+Last updated: 2026-07-30
+
+## Recovery Snapshot (2026-08-02)
+
+- The matched HDRC 10% random-head control completed with `EXIT:0`, using the
+  exact same 2,429-line subset, source checkpoint, seed and optimization budget
+  as the charset-aware condition.
+- Random-head calibrated test CER/AR/CR are `25.80/74.20/75.42`; matched
+  charset-aware results are `9.75/90.25/91.48`. The 16.05-point CER reduction
+  is now the authoritative classifier-transfer ablation.
+- Random-head artifacts are in
+  `logs/saqt_hdrc_transfer10random0801_full_seed42_0718/`; the matched mapped
+  artifacts are in `logs/saqt_hdrc_transfer10_full_seed42_0718/`.
+- No training process or tmux session remains. The paper-facing table was
+  replaced with this strict control and the anonymous manuscript was rebuilt:
+  33 result rows pass with zero warnings/failures, and PDF QA reports 27 A4
+  pages, 34 references, 53 assets and zero failures.
+- A subsequent implementation audit clarified that the control transfers
+  random pretrained source-classifier rows rather than freshly initializing
+  the target head. The manuscript now uses the accurate term
+  `character-agnostic random-row transfer`. It also reports 82,030 aligned
+  source training lines with 827,113 real boxes and 3,266 shared MTHv2/HDRC
+  characters covering 96.56% of HDRC test character occurrences. The rebuilt
+  PDF is 28 pages and passes the same automated checks.
+- Active method probe: tmux `saqt_query_geometry_retention_0802` runs a matched
+  MTHv2 query-geometry-retention experiment on GPU0. It anchors top-T teacher
+  query vertical centers/heights during CTC adaptation to close the current
+  non-differentiable sorting/geometry-drift gap. Output is
+  `logs/mthv2_query_geometry_retention_resume_16000_0802`; matched baseline
+  validation CER is `0.11879202286282202`. Keep only on a positive matched
+  validation result.
+- The probe subsequently improved validation CER from `0.118792` to `0.114455`
+  at the matched global-step endpoint with nearly unchanged blank ratio. The
+  full 12-epoch run and automatic postprocessing are active in tmux
+  `saqt_query_geometry_retention_full_0802`; output is
+  `logs/mthv2_query_geometry_retention_full_0802`.
+
+## Recovery Snapshot (2026-07-30)
+
+- HDRC 50% completed before the 2026-07-18 host interruption and passed unified
+  postprocessing. The strict low-resource evidence is now `4/4`. Its
+  validation-selected `blank=-2.0, nonblank=0.8` calibrated test CER/AR/CR are
+  `6.3410/93.6590/94.5572`.
+- MTHv2 seed 44 completed epochs 0--9; epoch 7 remains the protected best at
+  development CER `0.09624162552586628`. The run stopped during incomplete
+  epoch 10, and the host later rebooted. No seed-44 test result should be used
+  until unified postprocessing completes.
+- Exact output-directory resume now restores epoch/global step,
+  optimizer/scheduler, and historical best CER in `finetuning.py`; focused
+  tests are in `tests/test_finetuning_resume.py`.
+- Active tmux: `saqt_mthv2_seed44_recovery_0730`, running on the single
+  currently visible RTX 3090. It resumed at epoch 10/global step 65000 and will
+  automatically run unified postprocessing after epoch 11.
+- The former QCLC and final-evidence watcher tmux sessions were lost at reboot.
+  Relaunch them only after seed 44 reaches strict `3/3` readiness; do not start
+  a competing GPU job while seed 44 is active.
+- Seed 44 subsequently completed with `EXIT:0`; strict seed evidence is now
+  `3/3`. Calibrated three-seed CER/AR/CR are
+  `3.50+/-0.25 / 96.50+/-0.25 / 96.77+/-0.23`.
+- The complete HDRC low-resource evidence is `4/4`; Figure 4 and its CSV were
+  generated and pass the Figure 1--4 asset gate.
+- Active tmux is now `saqt_mthv2_qclc_queue_0730` on GPU0. It runs the fixed
+  development-only QCLC gate and evaluates test only if the gate is positive.
+- QCLC passed that gate with development CER `0.11595983771087572` versus
+  `0.11879202286282202`; unified QCLC and matched-baseline test collection is
+  active.
+- A current evidence-only draft excluding unfinished QCLC numbers is available
+  at `docs/paper-drafts/paper_draft.md` and
+  `docs/paper-drafts/submission/saqt_aas_anonymous_draft.pdf`. The PDF is 28
+  A4 pages with 35 references and 54 assets; automated and selected-page visual
+  checks pass.
+- QCLC later completed with `EXIT:0`. Its calibrated test CER is `3.97%`
+  versus matched baseline `3.95%`; empty prediction rate improves
+  `0.57% -> 0.18%`, so the manuscript treats it as a diagnostic tradeoff rather
+  than a core gain.
+- The complete current initial draft now includes Method 3.5, the matched QCLC
+  tables, three-seed statistics, and HDRC low-resource Figure 4. The anonymous
+  PDF is 29 A4 pages with 35 references and 61 assets; automated QA and
+  selected-page visual checks pass. No experiment process is running.
+
+## Current Authoritative Snapshot (2026-07-18)
+
+The active goal is an anonymous, evidence-audited submission to 《自动化学报》.
+Older June experiment descriptions below are provenance, not current process
+state. On resume, read `experiments/notes/goal_status.md`, then inspect the tmux
+sessions and status files listed here before launching anything.
+
+Active/queued experiments:
+
+- MTHv2 main-model seed 43 completed and passed strict unified-result checks.
+  Its clean test CER/AR/CR are `4.1471/95.8529/96.0297`; validation-selected
+  `blank=-2.0, nonblank=0.8` gives calibrated test CER/AR/CR
+  `3.7412/96.2588/96.5440`.
+- MTHv2 seed 44 started at `13:29:35` in tmux
+  `saqt_mthv2_seed44_queue_0718` on GPU1, under the matched 12-epoch protocol.
+- HDRC 10% nested low-resource transfer completed with `EXIT:0`. Its calibrated
+  test CER/AR/CR are `9.7462/90.2538/91.4827` at validation-selected
+  `blank=-2.0, nonblank=1.0`; see
+  `logs/saqt_hdrc_transfer10_full_seed42_0718/micro_test_bias_bm20_nb10_0718.json`.
+- HDRC 25% completed and passed strict unified-result checks. Its clean test
+  CER/AR/CR are `8.4905/91.5095/91.7687`; validation-selected
+  `blank=-2.0, nonblank=1.0` gives calibrated test CER/AR/CR
+  `6.9354/93.0646/94.2265`.
+- HDRC 50% started automatically at `12:48:00` in tmux
+  `saqt_hdrc_low_resource_queue_0718` on GPU0. Its independent classifier head
+  completed with best development CER `0.19417441044302478` at `epoch=2,
+  global_step=15000`; the matched 12-epoch full run started from that protected
+  checkpoint at `14:14:22`.
+- QCLC matched probe: waiting tmux `saqt_mthv2_qclc_queue_0718`; it starts on
+  GPU1 only after the seed-44 pipeline reports `EXIT:0`. The probe stops before
+  test postprocessing unless validation CER beats `0.11879202286282202`. A
+  positive branch now also postprocesses the already-trained same-head,
+  same-seed, same-budget baseline `logs/mthv2_base_resume_1000_0607`; test
+  results are reported without a second acceptance gate.
+
+Current intermediate validation:
+
+- MTHv2 seed 43: all 12 epochs completed; epoch-7 CER
+  `0.10030692971795412` remains the saved best (`epoch=7,
+  global_step=55000`). The strict seed builder now accepts seeds 42 and 43
+  (`2/3` ready), while seed 44 is running.
+- MTHv2 seed 44: epoch-0 development CER is `0.12208094240183898`; this is an
+  intermediate validation result. Epoch 1 improved it to
+  `0.10987788140880596`, and epoch 2 improved it to
+  `0.10709067322003646`, and epoch 3 improved it to
+  `0.10432417147997171`; the protected checkpoint is `epoch=3,
+  global_step=35000`, and unified test evidence is not yet present.
+- HDRC 50% full finetuning: epoch-0 development CER is
+  `0.09264636472628718`; the protected checkpoint is `epoch=0,
+  global_step=20000`. This is already below the 25% condition's best
+  development CER, but remains intermediate evidence until the fixed run and
+  unified postprocessing finish. Epochs 1--3 regressed to
+  `0.2516628219491267/0.21231068454181926/0.22554991326911883`; the protected
+  best remains epoch 0.
+- HDRC 25% independently reconstructed head: epoch-0/1/2 CER
+  `0.2587038576998038/0.22920193771657965/0.21438858156384388`. The full run
+  has verified `resume`, `lr=1e-5`, `epochs=12`, fraction/seed, and nested-anchor
+  settings in `config_args_all.json`. Full epoch-0/1/2/3/4 validation CER is
+  `0.12145243720268993/0.10928225991968375/0.10614284204433325/0.10314356406401663/0.09852336950933273`;
+  epoch 4 at `global_step=24280` remained the protected best through epoch 11.
+  Unified postprocessing completed with `EXIT:0`, and the strict HDRC builder
+  accepts 10%, 25%, and 100% (`3/4` ready) while 50% is running.
+- HDRC 10% independently reconstructed head: epoch-2 CER
+  `0.2563417660518842`.
+- HDRC 10% full finetuning completed the fixed 12 epochs. Epoch-0--4 CER
+  `0.17032209517700092/0.16614229078634163/0.15332695182697897/0.15522997114050782/0.1605014377142521`;
+  epoch 5--11 were
+  `0.32454301673147534/0.33619754565510424/0.2921901262956864/0.3601330345462829/0.331627247856814/0.37062222019942087/0.3630817910127929`.
+  Epoch 2 remains the protected saved best (`global_step=7284`). Unified
+  postprocessing completed at `2026-07-18T07:59:29+08:00`. Clean test
+  CER/AR/CR are `12.8832/87.1168/87.2822`; calibrated empty rate is `1.0352%`,
+  prediction/GT length ratio is `0.99084`, and calibrated bucket CER for
+  `1/2/3-5/6-10/11+` is `13.0573/12.2307/8.6687/11.9613/9.2189`.
+
+New reproducibility/collection artifacts:
+
+- Nested HDRC protocol and fingerprints:
+  `experiments/notes/hdrc_low_resource_protocol_0718.md` and
+  `hdrc_low_resource_manifest_0718.json`. The protocol explicitly records
+  that CTC `max_iterations=10000` is a per-epoch processed-sample cap, not an
+  optimizer-step count: 10%/25% traverse their pools each epoch, whereas
+  50%/100% stop at 10,000 samples and reshuffle next epoch.
+- Parameterized low-resource pipeline:
+  `experiments/scripts/run_hdrc_low_resource_fraction.sh`.
+- Three-seed manifest and pipeline:
+  `experiments/notes/mthv2_seed_manifest_0718.json` and
+  `experiments/scripts/run_mthv2_seed_repeat.sh`. The strict statistics builder
+  normalizes only the permitted seed/output/config-entry and `dino/saqt` alias
+  differences, then requires the remaining full configuration snapshots to be
+  identical. Current seed-42 and seed-43 configs pass this comparison.
+- Strict result builders:
+  `docs/paper-drafts/tools/build_hdrc_low_resource_results.py` and
+  `build_mthv2_seed_statistics.py`. They intentionally return incomplete until
+  every required JSON exists and matches the validation-selected bias.
+  The HDRC builder also follows each full run back to its independently trained
+  head configuration and verifies the common stage-1 source, charset mapping,
+  adaptation flags, learning rates, epoch counts, batch size, and sample
+  budget. The completed 10% and existing 100% runs pass this lineage gate.
+  The HDRC CSV and final Table 10 include a verified
+  `max_train_samples_per_epoch=min(label-pool lines, 10000)` column; the final
+  integrator rejects a missing or inconsistent per-epoch cap.
+- Matched QCLC evidence contract:
+  `experiments/notes/mthv2_qclc_manifest_0718.json` and
+  `docs/paper-drafts/tools/build_mthv2_qclc_ablation.py`. The builder validates
+  the development-set gate, complete clean/calibrated artifacts, length
+  buckets, calibration selection, checkpoint lineage, declared module fields,
+  and full-config equality outside the QCLC fields. A positive result is
+  integrated automatically; an incomplete positive branch stops the build.
+- Final result integration:
+  `docs/paper-drafts/tools/integrate_final_experiment_results.py`. It modifies
+  the result section, bilingual abstract, and conclusion only after both
+  strict builders have produced complete CSV files; incomplete inputs leave
+  the manuscript unchanged. A development-positive QCLC branch additionally
+  inserts a reproducible Method 3.5 with the implemented pooling, length loss,
+  bounded adaptive bias, supervision boundary, and fixed hyperparameters.
+  `verify_result_tables.py` rejects a QCLC result table if that method block is
+  absent. Once the generated seed/low-resource result block exists, the same
+  verifier also requires synchronized Chinese/English abstract and conclusion
+  evidence blocks, preventing a partial final freeze.
+- Figure asset gate: `docs/paper-drafts/tools/verify_figure_assets.py`. The
+  final watcher runs it with `--require-figure4` after low-resource generation;
+  it checks SVG/PDF/CSV completeness, editable SVG text, and vector-only data
+  figures. Figure 4 uses a zero CER baseline, actual sample-count tick labels,
+  an approximately 16 cm vector canvas, grayscale-safe redundant line/marker
+  encodings, and an explicit single-seed/no-error-bar caption.
+- Split audit: `tools/audit_recognition_splits.py` and
+  `experiments/notes/dataset_split_audit_0718.{json,md}`. The corrected HDRC
+  source-stem resolver confirms `936/113/123` pages and zero line/page overlap.
+- Anonymous manuscript:
+  `docs/paper-drafts/submission/saqt_aas_anonymous_draft.pdf`. Current QA is 25
+  A4 pages, 35 sequential references, 53 assets, zero machine-check failures;
+  see `verify_anonymous_submission.py` and `submission/README.md`.
+  The Chinese results section again contains the verified MTHv2
+  no-localization lower-bound table; the PDF verifier now rejects stale HTML
+  or PDF artifacts by checking manuscript-to-HTML-to-PDF modification order.
+- Identity-bearing submission template:
+  `docs/paper-drafts/submission/author_materials_template.md`. It is excluded
+  from the anonymous builder and collects author order, bilingual affiliations,
+  contributions, funding, declarations, signatures, and institution-seal
+  status. The official one-page 2025 author-commitment PDF has also been
+  downloaded to
+  `docs/paper-drafts/submission/forms/aas_author_commitment_2025_official.pdf`;
+  `forms/README.md` records the official source, 2026-07-18 access date, and
+  SHA-256. Authors must recheck the source on submission day, complete all
+  signatures, and obtain the required institutional seal.
+- Submission reproducibility index:
+  `docs/paper-drafts/submission/REPRODUCIBILITY.md`. It links the authoritative
+  split evidence, configs, runners, manifests, evaluation tools, baseline
+  evidence, strict builders, and verifiers without copying provisional values.
+- AI-use disclosure: `docs/paper-drafts/110_ai_use_disclosure_draft.md` records
+  the current machine-observed environment as Codex CLI `0.144.5`, model
+  `gpt-5.6-sol`. Authors still need to confirm whether earlier sessions used
+  other versions.
+- Citation audit: `docs/paper-drafts/112_reference_metadata_audit_0718.md`.
+  The nine previously identifier-free records were checked against primary
+  sources; all 35 cited records now have DOI, stable URL, or arXiv provenance,
+  and the three BibTeX copies are byte-identical.
+- The two Overleaf ZIP copies are rebuilt from the current `latex/` tree and
+  have SHA-256
+  `8aae8ea0e12d636d03bff45407ef03a98641ae9a7cd862c5af62e80ccf61f7ab`.
+  `verify_latex_package.py` now hashes every archived file against the current
+  source tree instead of only comparing the two ZIP copies to each other.
+
+Remaining hard gates:
+
+1. Finish seeds 43/44 and report mean plus sample standard deviation.
+2. Finish HDRC 10/25/50/100 clean and validation-fixed calibrated curves.
+3. Rebuild result tables, Figure 4, abstract/results/conclusion, and anonymous
+   PDF from frozen numbers.
+4. Obtain author-confirmed AI tool/model disclosure and the author metadata,
+   signatures, and institutional stamp required outside the anonymous PDF.
+
+The CPU final-evidence watcher also waits for the queued QCLC gate. An explicit
+negative result permits automatic finalization. A validation-positive result
+must pass the matched QCLC builder and is then inserted into the result section
+before rebuilding the final PDF; incomplete matched evidence stops with
+`STOP_QCLC_POSITIVE_INCOMPLETE_MATCHED_EVIDENCE`. The watcher was reloaded at
+`2026-07-18T09:07:13+08:00` without restarting GPU work.
 
 ## Project Goal
 
@@ -141,7 +398,7 @@ Full-MTHv2 stage-1 -> MTHv2 head reconstruction:
 - Old MTHv2 head baseline epoch-2 CER: `0.14526833428705468`.
 - Interpretation: new head is worse than old head but close enough that the user chose to try full finetuning.
 
-Current active DTLR full finetune:
+Historical June full-MTHv2 finetune snapshot (no longer active):
 
 - tmux session: `dtlr_mthv2_full_ft_0601`
 - Log dir: `logs/mthv2_fullstage1pre_mthv2_full_tmux_0601`
@@ -177,7 +434,7 @@ Current active DTLR full finetune:
 - Full-MTHv2 stage-1 over-activates nonblank queries in box diagnostics.
 - Long SAQT training should not be launched in a Codex foreground exec session; use `tmux`.
 
-## Next Recommended Steps
+## Historical 2026-06-09 Next Steps
 
 1. Let `dtlr_mthv2_full_ft_0601` finish or stop only if validation clearly degrades for multiple epochs and a best checkpoint is already saved.
 2. After completion, run clean CTC error analysis on valid/test for `logs/mthv2_fullstage1pre_mthv2_full_tmux_0601/checkpoint_best_regular.pth`.

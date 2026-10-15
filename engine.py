@@ -10,8 +10,12 @@ from typing import Iterable
 from util.utils import to_device
 import numpy as np
 import torch
+import torch.nn.functional as F
 import util.misc as utils
-from datasets.panoptic_eval import PanopticEvaluator
+try:
+    from datasets.panoptic_eval import PanopticEvaluator
+except ModuleNotFoundError:
+    PanopticEvaluator = None
 import re
 import editdistance
 from util.visualizer import COCOVisualizer
@@ -81,6 +85,48 @@ def _sort_pred_logits_by_direction(pred_logits, pred_boxes, directions):
         1,
         idx.unsqueeze(-1).expand(-1, -1, pred_logits.shape[-1]),
     )
+
+
+def compute_query_geometry_retention_loss(
+    student_outputs,
+    teacher_outputs,
+    targets,
+    confidence_power=1.0,
+):
+    """Keep high-confidence vertical query geometry near a frozen teacher."""
+    student_boxes = student_outputs["pred_boxes"]
+    teacher_boxes = teacher_outputs["pred_boxes"].detach()
+    teacher_scores = teacher_outputs["pred_logits"].detach().sigmoid().amax(-1)
+
+    sample_losses = []
+    selected_queries = 0
+    for batch_idx, target in enumerate(targets):
+        target_length = int(target["labels"].numel())
+        query_count = int(teacher_scores.shape[1])
+        selected_count = min(target_length, query_count)
+        if selected_count <= 0:
+            continue
+
+        scores, indices = teacher_scores[batch_idx].topk(selected_count)
+        # Vertical center and height are the geometry used to establish and
+        # stabilize the reading sequence. Horizontal extent is intentionally
+        # left free to adapt across domains.
+        student_geometry = student_boxes[batch_idx, indices][:, [1, 3]]
+        teacher_geometry = teacher_boxes[batch_idx, indices][:, [1, 3]]
+        per_query = F.smooth_l1_loss(
+            student_geometry,
+            teacher_geometry,
+            reduction="none",
+        ).mean(-1)
+        weights = scores.clamp(min=1e-4).pow(float(confidence_power))
+        sample_losses.append((per_query * weights).sum() / weights.sum())
+        selected_queries += selected_count
+
+    if not sample_losses:
+        return student_boxes.sum() * 0.0, {"selected_queries": 0.0}
+    return torch.stack(sample_losses).mean(), {
+        "selected_queries": float(selected_queries) / len(sample_losses)
+    }
 
 
 def _compute_direction_accuracy(outputs, targets):
@@ -257,7 +303,7 @@ def train_one_epoch_CTC(model: torch.nn.Module, criterion: torch.nn.Module,
                     data_loader: Iterable, optimizer: torch.optim.Optimizer,
                     device: torch.device, epoch: int, max_norm: float = 0, 
                     wo_class_error=False, lr_scheduler=None, args=None, logger=None, ema_m=None,run = None,
-                    global_step_start=0, step_callback=None):
+                    global_step_start=0, step_callback=None, structure_teacher=None):
 
     model.train()
    # criterion.train()
@@ -289,7 +335,26 @@ def train_one_epoch_CTC(model: torch.nn.Module, criterion: torch.nn.Module,
                 outputs = model(samples, targets)
             
             loss_dict, preds, new_preds= criterion.loss_CTC(outputs, targets,None,None, return_preds = True)
-            weight_dict = criterion.weight_dict
+            weight_dict = dict(criterion.weight_dict)
+            structure_retention_coef = float(
+                getattr(args, "query_geometry_retention_coef", 0.0)
+            )
+            if structure_teacher is not None and structure_retention_coef > 0.0:
+                with torch.no_grad():
+                    teacher_outputs = structure_teacher(samples, targets)
+                retention_loss, retention_stats = compute_query_geometry_retention_loss(
+                    outputs,
+                    teacher_outputs,
+                    targets,
+                    confidence_power=float(
+                        getattr(args, "query_geometry_retention_confidence_power", 1.0)
+                    ),
+                )
+                loss_dict["loss_query_geometry_retention"] = retention_loss
+                loss_dict["query_geometry_retention_selected"] = retention_loss.new_tensor(
+                    retention_stats["selected_queries"]
+                )
+                weight_dict["loss_query_geometry_retention"] = structure_retention_coef
             loss = sum(
                 loss_dict[k] * weight_dict[k]
                 for k in loss_dict.keys()
@@ -485,6 +550,11 @@ def evaluate(model, criterion, postprocessors, data_loader, base_ds, device, out
 
     panoptic_evaluator = None
     if 'panoptic' in postprocessors.keys():
+        if PanopticEvaluator is None:
+            raise RuntimeError(
+                "Panoptic evaluation is not available in this SAQT repository cleanup. "
+                "Use the line-level recognition/detection evaluation paths instead."
+            )
         panoptic_evaluator = PanopticEvaluator(
             data_loader.dataset.ann_file,
             data_loader.dataset.ann_folder,
@@ -675,6 +745,11 @@ def test(model, criterion, postprocessors, data_loader, base_ds, device, output_
 
     panoptic_evaluator = None
     if 'panoptic' in postprocessors.keys():
+        if PanopticEvaluator is None:
+            raise RuntimeError(
+                "Panoptic evaluation is not available in this SAQT repository cleanup. "
+                "Use the line-level recognition/detection evaluation paths instead."
+            )
         panoptic_evaluator = PanopticEvaluator(
             data_loader.dataset.ann_file,
             data_loader.dataset.ann_folder,

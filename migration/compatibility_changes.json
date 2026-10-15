@@ -1,0 +1,92 @@
+{
+  "target_gpu_validation": "PENDING_5090_INSTANCE",
+  "changes": [
+    {
+      "path": "evaluation.py",
+      "before_sha256": "541d4f1911d38aa605bb49ae2c24c572c12d7a8e118c3b05f151ef18d66abc81",
+      "after_sha256": "48538a38f7bdfaf74b005a956eaf5e762eeaf56dc59dfeda6850de477cf93510"
+    },
+    {
+      "path": "finetuning.py",
+      "before_sha256": "b45c3ba25e94eaa433f527924dabe59c7693fd09b3bfb8b668e52d66713edb5f",
+      "after_sha256": "6cafb6ed2d278b13a620d9b3f2071013282e38493f7829826b44f8bbae3d1966"
+    },
+    {
+      "path": "main_synthetic.py",
+      "before_sha256": "f2c9cdff4116e670ecd09bdf8994b9f513f7eae7d642ca58ea03178ab2bb1b85",
+      "after_sha256": "7317ad663901afc52b2412c527a3f8e2ed731e7347b424eddafcbe3f4cfad8a4"
+    },
+    {
+      "path": "models/dino/backbone.py",
+      "before_sha256": "d2441647670458426de67ba9c6dc8e78b9e02b772fe982713a0e3ffdc8a77882",
+      "after_sha256": "ee094b32da1202787a77720db7efc9d82f98b0be3058b65a6a332d29e0baa059"
+    },
+    {
+      "path": "models/dino/ops/src/cuda/ms_deform_attn_cuda.cu",
+      "before_sha256": "a2602665b75e8e4d89a8108b1de0b1f33a7e35c2a78bca35351d17d5dfd62554",
+      "after_sha256": "7a34680872cfe61d0dd46e300268c54e372bfe661a34d1389844262b04c922ab"
+    },
+    {
+      "path": "models/dino/ops/src/cuda/ms_deform_im2col_cuda.cuh",
+      "before_sha256": "136729520587cbf0593209d692af61a1e8af5909bcf34b8bacb8844878496bad",
+      "after_sha256": "60c8552034ae706bd31c05de02d1f43f1d52a01c65b6f311f2bf365e21c87bc9"
+    },
+    {
+      "path": "models/dino/ops/src/ms_deform_attn.h",
+      "before_sha256": "2fdc244f99e3e3b9af8dae02e09139de3f546eef83748495c3f175f48278cf41",
+      "after_sha256": "58fc2b39b37a210ef14b713a38c4b70234ce9ef496ad889c83f30f98a0e380d1"
+    },
+    {
+      "path": "tools/analyze_ctc_errors.py",
+      "before_sha256": "0843749b089dbdce4d05df1d6a629308ba09890f4d845076573c1a0b360d26a3",
+      "after_sha256": "dc612ff78bdbf040d11859e19ec6a31c3485c0efd8e5e4c263181307c0039a86"
+    },
+    {
+      "path": "tools/analyze_short_blank_margin.py",
+      "before_sha256": "81a10d638ab2d687817779083955dfb19bd891e7c9f165c6bccb6bb6a7e70226",
+      "after_sha256": "36c45d6d7d8e87ccd23ef877614aba0067c063fe49ec0c5e9167b7a386682d4f"
+    },
+    {
+      "path": "tools/diagnose_boxes.py",
+      "before_sha256": "833570176d9413c61292228e482da1d91502da6947802efafbeff686a32512e7",
+      "after_sha256": "7a29afc925e2a5b3fb68dc2d0ce06eff4d641818218bbac879c7c50d30292805"
+    },
+    {
+      "path": "tools/eval_chinese_micro.py",
+      "before_sha256": "18d25915e5eb7bd1077c67db378be62c0b4d52208e0a9a2ca7417180aa5a16fc",
+      "after_sha256": "11e5e9fb47de990f7c32a4924d7f5ec85e2e79e2c5117e85f69fb7100e9b6f93"
+    },
+    {
+      "path": "tools/eval_ctc_micro_batch.py",
+      "before_sha256": "ea7037d3220eba7555b9d61acc3a230048d98511cc61ae1be9aa3fc1ee5eb389",
+      "after_sha256": "65efd740fb41de28b167ec191d4fc304298a8756fdcab855e46cbfc860f16a4f"
+    },
+    {
+      "path": "tools/evaluate_short_rescue.py",
+      "before_sha256": "27ee72de40d4a6c38c1af5ec0b9d4cbcd553a65fb1141339d1c32df12d9f047f",
+      "after_sha256": "98b64b9adaf5773918762a5276b0bcaaa3a47b4ff852a28a79afc6103cd0e052"
+    },
+    {
+      "path": "tools/make_qualitative_comparison_figures.py",
+      "before_sha256": "22775eb847364ba8ffefd5f71f02c41bf1b1c404f58a2e08850563399dd7d1b3",
+      "after_sha256": "e409c3c428798dd6a8854d1421b34eddb941a406e999519358223db6b8e05727"
+    },
+    {
+      "path": "tools/repro_msda_dump.py",
+      "before_sha256": "98f958f60e9af785f01ecd52d342957062bbdc0481b86b981f243e7edbcb82b1",
+      "after_sha256": "4b447adde99fad22ca7ab7355fd15b540d34d06d94c598fb71708d4f83df93ca"
+    },
+    {
+      "path": "tools/sweep_ctc_decode_bias.py",
+      "before_sha256": "3833f3128068272d71a1cfba09361d27f3a3f1d3f537de84dc59cf79a466dade",
+      "after_sha256": "fd9b89c24a66994ccea51ccc2b563bed9599651c393861eb5416f991e1b315d0"
+    },
+    {
+      "path": "tools/visualize_ctc_by_length.py",
+      "before_sha256": "fb00a5e172ce94b19471b17598da459b3eabdb131ed945208d282783246643b8",
+      "after_sha256": "2ac5caef8969c1c5906ad35f4f1177ab4553b55e416943c942849d46dea6a534"
+    }
+  ],
+  "scope": "CUDA/PyTorch API compatibility only; no training hyperparameter or model math changes",
+  "checkpoint_loading": "Explicit weights_only=False for existing trusted project checkpoints; no global override"
+}

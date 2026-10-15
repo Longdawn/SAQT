@@ -5,6 +5,7 @@ if __name__ == "__main__":
     sys.path.append(os.path.dirname(sys.path[0]))
 
 import json
+import hashlib
 import os
 import pickle
 import random
@@ -28,6 +29,45 @@ with open(os.path.join(current_dir, "config.json"), "r") as f:
     datasets_path = json.load(f)
 
 datasets_path = datasets_path["datasets_path"]
+
+
+def select_train_fraction_indices(num_samples, fraction, seed, anchor_fraction=None):
+    """Return a stable subset, optionally extending a fixed anchor subset."""
+    fraction = float(fraction)
+    if not 0.0 < fraction <= 1.0:
+        raise ValueError(f"mth1000_train_fraction must be in (0, 1], got {fraction}")
+    if num_samples <= 0 or fraction == 1.0:
+        return list(range(num_samples))
+
+    subset_size = max(1, int(num_samples * fraction + 0.5))
+    generator = random.Random(int(seed))
+    if anchor_fraction is None:
+        return sorted(generator.sample(range(num_samples), subset_size))
+
+    anchor_fraction = float(anchor_fraction)
+    if not 0.0 < anchor_fraction <= 1.0:
+        raise ValueError(
+            "mth1000_train_fraction_anchor must be in (0, 1], "
+            f"got {anchor_fraction}"
+        )
+    anchor_size = max(1, int(num_samples * anchor_fraction + 0.5))
+    if subset_size <= anchor_size:
+        return sorted(generator.sample(range(num_samples), subset_size))
+
+    # Preserve the already established anchor subset exactly, then use one
+    # deterministic ordering of its complement for all larger fractions.
+    anchor_indices = generator.sample(range(num_samples), anchor_size)
+    anchor_set = set(anchor_indices)
+    remaining = [index for index in range(num_samples) if index not in anchor_set]
+    extension_generator = random.Random(int(seed) + 1)
+    extension_generator.shuffle(remaining)
+    selected = anchor_indices + remaining[: subset_size - anchor_size]
+    return sorted(selected)
+
+
+def sample_id_fingerprint(samples):
+    identities = [str(sample.get("id", index)) for index, sample in enumerate(samples)]
+    return hashlib.sha256("\n".join(identities).encode("utf-8")).hexdigest()
 
 
 class MTH1000(Dataset):
@@ -81,6 +121,35 @@ class MTH1000(Dataset):
                 f"[MTH1000] split={self.mode} filter_direction={self.filter_direction} "
                 f"{len(filtered_samples)}/{len(self.data['ground_truth'][self.mode])}"
             )
+
+        self.train_fraction_manifest = None
+        if self.mode == "train":
+            train_fraction = float(getattr(args, "mth1000_train_fraction", 1.0))
+            subset_seed = int(getattr(args, "mth1000_train_fraction_seed", 42))
+            anchor_fraction = getattr(args, "mth1000_train_fraction_anchor", None)
+            source_size = len(self.samples)
+            selected_indices = select_train_fraction_indices(
+                source_size, train_fraction, subset_seed, anchor_fraction
+            )
+            if len(selected_indices) != source_size:
+                self.samples = [self.samples[index] for index in selected_indices]
+            self.train_fraction_manifest = {
+                "root": root_name,
+                "fraction": train_fraction,
+                "seed": subset_seed,
+                "anchor_fraction": (
+                    float(anchor_fraction) if anchor_fraction is not None else None
+                ),
+                "source_size": source_size,
+                "selected_size": len(self.samples),
+                "selected_id_sha256": sample_id_fingerprint(self.samples),
+            }
+            if train_fraction < 1.0:
+                print(
+                    f"[MTH1000] split=train fraction={train_fraction:.4f} "
+                    f"seed={subset_seed} selected={len(self.samples)}/{source_size} "
+                    f"sha256={self.train_fraction_manifest['selected_id_sha256'][:12]}"
+                )
 
         if self.use_char_boxes:
             has_raw_annotations = os.path.isdir(self.textline_path) and os.path.isdir(self.char_path)

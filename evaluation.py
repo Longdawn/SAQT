@@ -67,7 +67,7 @@ def load_model(model):
             print(f"Skipped {len(skipped)} incompatible params (e.g. classification head).")
 
     if not args.new_class_embedding:
-        checkpoint = torch.load(args.weights, map_location="cpu")
+        checkpoint = torch.load(args.weights, map_location="cpu", weights_only=False)
         _load_compatible_weights(model, checkpoint["model"])
         model.eval()
         model.to(device)
@@ -99,7 +99,7 @@ def load_model(model):
 
     if args.new_label_enc:
         model.label_enc = nn.Embedding(len(dataset_val.charset)+1,features_dim ).to(device)
-    checkpoint = torch.load(args.weights, map_location="cpu")
+    checkpoint = torch.load(args.weights, map_location="cpu", weights_only=False)
     _load_compatible_weights(model, checkpoint["model"])
     model.eval()
     model.to(device)

@@ -1,0 +1,23 @@
+{
+  "source_files_verified": 277,
+  "compatibility_files_changed": 17,
+  "python_files_syntax_checked": 247,
+  "shell_syntax": "PASS",
+  "asset_relay_local_integration": [
+    "binary/unicode round-trip PASS",
+    "identical file reuse PASS",
+    "different file overwrite refused PASS"
+  ],
+  "credential_pattern_scan": "no matches in the checked token/private-key patterns",
+  "large_artifacts": "no model weights, datasets, compiled .so/.o, or files over 5 MiB",
+  "not_yet_tested": [
+    "AutoDL SSH transfer",
+    "dependency installation",
+    "CUDA compilation on sm_120",
+    "CUDA forward/backward parity",
+    "real model inference",
+    "short training and throughput",
+    "cross-device CER"
+  ],
+  "github_target": "https://github.com/Longdawn/SAQT/tree/codex/autodl5090-migration"
+}

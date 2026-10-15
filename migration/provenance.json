@@ -1,0 +1,18 @@
+{
+  "collected_at": "2026-10-15T02:36:56.280148+00:00",
+  "source_git_commit": "74b11b311a02b98fbb98a379dd6e77a7bb37eb2f",
+  "code_source": "active experiment frozen Python tree; CUDA source and project metadata from repository",
+  "source_runtime": {
+    "python": "3.11",
+    "torch": "2.1.0+cu118",
+    "cuda": "11.8"
+  },
+  "target_runtime": {
+    "python": "3.11",
+    "torch": "2.7.1+cu128",
+    "torchvision": "0.22.1+cu128",
+    "cuda_toolkit": "12.8"
+  },
+  "target_gpu_validation": "NOT_RUN_NO_5090_INSTANCE",
+  "source_training": "left running; no source files, environments, processes, or GPU state modified"
+}

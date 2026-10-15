@@ -41,6 +41,12 @@ def parse_args():
     parser.add_argument("--ratio_min", type=float, default=1.5)
     parser.add_argument("--ratio_max", type=float, default=2.0)
     parser.add_argument(
+        "--sample_manifest",
+        type=str,
+        default=None,
+        help="Optional JSONL manifest mapping sample id to source_id.",
+    )
+    parser.add_argument(
         "--options",
         nargs="+",
         action=DictAction,
@@ -164,7 +170,7 @@ def main():
     if cli.new_class_embedding:
         _adapt_class_head(model, len(dataset.charset), device)
 
-    ckpt = torch.load(cli.checkpoint, map_location="cpu")
+    ckpt = torch.load(cli.checkpoint, map_location="cpu", weights_only=False)
     ckpt_model = ckpt["model"] if isinstance(ckpt, dict) and "model" in ckpt else ckpt
     skipped = _load_compatible_state(model, ckpt_model)
     model.to(device)
@@ -184,6 +190,13 @@ def main():
     totals = CtcTotals()
     by_len_bin = defaultdict(CtcTotals)
     by_len_exact = defaultdict(CtcTotals)
+    by_source = defaultdict(CtcTotals)
+    source_by_id = {}
+    if cli.sample_manifest is not None:
+        with Path(cli.sample_manifest).open("r", encoding="utf-8") as handle:
+            for line in handle:
+                row = json.loads(line)
+                source_by_id[str(row["id"])] = str(row["source_id"])
     processed = 0
 
     with torch.no_grad():
@@ -213,6 +226,14 @@ def main():
                 totals.add(gt_len, pred_len, dist, ins, dels, subs)
                 by_len_bin[length_bin(gt_len)].add(gt_len, pred_len, dist, ins, dels, subs)
                 by_len_exact[str(gt_len)].add(gt_len, pred_len, dist, ins, dels, subs)
+                if source_by_id:
+                    dataset_index = start_index + processed
+                    sample_id = str(dataset.samples[dataset_index]["id"])
+                    if sample_id not in source_by_id:
+                        raise KeyError(f"Sample {sample_id!r} is missing from {cli.sample_manifest}")
+                    by_source[source_by_id[sample_id]].add(
+                        gt_len, pred_len, dist, ins, dels, subs
+                    )
                 processed += 1
 
             if batch_idx % 50 == 0:
@@ -252,6 +273,10 @@ def main():
             "by_gt_len_exact": {
                 key: add_rates(value.to_summary())
                 for key, value in sorted(by_len_exact.items(), key=lambda item: int(item[0]))
+            },
+            "by_source": {
+                key: add_rates(value.to_summary())
+                for key, value in sorted(by_source.items())
             },
         }
     )

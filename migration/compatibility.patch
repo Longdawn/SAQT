@@ -1,0 +1,376 @@
+--- a/evaluation.py
++++ b/evaluation.py
+@@ -67,7 +67,7 @@
+             print(f"Skipped {len(skipped)} incompatible params (e.g. classification head).")
+ 
+     if not args.new_class_embedding:
+-        checkpoint = torch.load(args.weights, map_location="cpu")
++        checkpoint = torch.load(args.weights, map_location="cpu", weights_only=False)
+         _load_compatible_weights(model, checkpoint["model"])
+         model.eval()
+         model.to(device)
+@@ -99,7 +99,7 @@
+ 
+     if args.new_label_enc:
+         model.label_enc = nn.Embedding(len(dataset_val.charset)+1,features_dim ).to(device)
+-    checkpoint = torch.load(args.weights, map_location="cpu")
++    checkpoint = torch.load(args.weights, map_location="cpu", weights_only=False)
+     _load_compatible_weights(model, checkpoint["model"])
+     model.eval()
+     model.to(device)
+--- a/finetuning.py
++++ b/finetuning.py
+@@ -718,7 +718,7 @@
+         base_ds = get_coco_api_from_dataset(dataset_val)
+ 
+     if args.frozen_weights is not None:
+-        checkpoint = torch.load(args.frozen_weights, map_location="cpu")
++        checkpoint = torch.load(args.frozen_weights, map_location="cpu", weights_only=False)
+ 
+         model_without_ddp.detr.load_state_dict(checkpoint["model"])
+ 
+@@ -751,7 +751,7 @@
+                 args.resume, map_location="cpu", check_hash=True
+             )
+         else:
+-            checkpoint = torch.load(args.resume, map_location="cpu")
++            checkpoint = torch.load(args.resume, map_location="cpu", weights_only=False)
+ 
+         _load_compatible_state(model_without_ddp, checkpoint["model"])
+         if args.use_ema:
+@@ -905,11 +905,11 @@
+                     args.resume, map_location="cpu", check_hash=True
+                 )
+             else:
+-                checkpoint = torch.load(args.resume, map_location="cpu")
++                checkpoint = torch.load(args.resume, map_location="cpu", weights_only=False)
+             _load_compatible_state(model_without_ddp, checkpoint["model"])
+ 
+     if (not args.resume) and args.pretrain_model_path:
+-        checkpoint_full = torch.load(args.pretrain_model_path, map_location="cpu")
++        checkpoint_full = torch.load(args.pretrain_model_path, map_location="cpu", weights_only=False)
+         checkpoint = checkpoint_full["model"]
+         # `pretrain_model_path` is used for weight initialization only.
+         # Do not inherit the source checkpoint epoch into a new finetuning run.
+@@ -1010,7 +1010,7 @@
+                 "query_geometry_teacher_checkpoint is required when "
+                 "query_geometry_retention_coef > 0"
+             )
+-        teacher_checkpoint = torch.load(teacher_path, map_location="cpu")
++        teacher_checkpoint = torch.load(teacher_path, map_location="cpu", weights_only=False)
+         structure_teacher = copy.deepcopy(model_without_ddp)
+         _load_compatible_state(structure_teacher, teacher_checkpoint["model"])
+         structure_teacher.to(device)
+--- a/main_synthetic.py
++++ b/main_synthetic.py
+@@ -240,7 +240,7 @@
+         base_ds = get_coco_api_from_dataset(dataset_val)
+ 
+     if args.frozen_weights is not None:
+-        checkpoint = torch.load(args.frozen_weights, map_location='cpu')
++        checkpoint = torch.load(args.frozen_weights, map_location='cpu', weights_only=False)
+         model_without_ddp.detr.load_state_dict(checkpoint['model'])
+ 
+     output_dir = Path(args.output_dir)
+@@ -251,7 +251,7 @@
+             checkpoint = torch.hub.load_state_dict_from_url(
+                 args.resume, map_location='cpu', check_hash=True)
+         else:
+-            checkpoint = torch.load(args.resume, map_location='cpu')
++            checkpoint = torch.load(args.resume, map_location='cpu', weights_only=False)
+         model_without_ddp.load_state_dict(checkpoint['model'])
+         if args.use_ema:
+             if 'ema_model' in checkpoint:
+@@ -264,7 +264,7 @@
+             args.start_epoch = checkpoint['epoch'] + 1
+ 
+     if (not args.resume) and args.pretrain_model_path:
+-        checkpoint = torch.load(args.pretrain_model_path, map_location='cpu')['model']
++        checkpoint = torch.load(args.pretrain_model_path, map_location='cpu', weights_only=False)['model']
+         from collections import OrderedDict
+         _ignorekeywordlist = args.finetune_ignore if args.finetune_ignore else []
+         ignorelist = []
+--- a/models/dino/backbone.py
++++ b/models/dino/backbone.py
+@@ -191,7 +191,7 @@
+                 'swin_L_384_22k': 'swin_large_patch4_window12_384_22k.pth',
+             }
+             pretrainedpath = os.path.join(pretrained_dir, PTDICT[args.backbone])
+-            checkpoint = torch.load(pretrainedpath, map_location='cpu')['model']
++            checkpoint = torch.load(pretrainedpath, map_location='cpu', weights_only=False)['model']
+             from collections import OrderedDict
+             def key_select_function(keyname):
+                 if 'head' in keyname:
+--- a/models/dino/ops/src/cuda/ms_deform_attn_cuda.cu
++++ b/models/dino/ops/src/cuda/ms_deform_attn_cuda.cu
+@@ -28,17 +28,17 @@
+ {
+     const at::cuda::OptionalCUDAGuard device_guard(device_of(value));
+ 
+-    AT_ASSERTM(value.is_contiguous(), "value tensor has to be contiguous");
+-    AT_ASSERTM(spatial_shapes.is_contiguous(), "spatial_shapes tensor has to be contiguous");
+-    AT_ASSERTM(level_start_index.is_contiguous(), "level_start_index tensor has to be contiguous");
+-    AT_ASSERTM(sampling_loc.is_contiguous(), "sampling_loc tensor has to be contiguous");
+-    AT_ASSERTM(attn_weight.is_contiguous(), "attn_weight tensor has to be contiguous");
++    TORCH_CHECK(value.is_contiguous(), "value tensor has to be contiguous");
++    TORCH_CHECK(spatial_shapes.is_contiguous(), "spatial_shapes tensor has to be contiguous");
++    TORCH_CHECK(level_start_index.is_contiguous(), "level_start_index tensor has to be contiguous");
++    TORCH_CHECK(sampling_loc.is_contiguous(), "sampling_loc tensor has to be contiguous");
++    TORCH_CHECK(attn_weight.is_contiguous(), "attn_weight tensor has to be contiguous");
+ 
+-    AT_ASSERTM(value.type().is_cuda(), "value must be a CUDA tensor");
+-    AT_ASSERTM(spatial_shapes.type().is_cuda(), "spatial_shapes must be a CUDA tensor");
+-    AT_ASSERTM(level_start_index.type().is_cuda(), "level_start_index must be a CUDA tensor");
+-    AT_ASSERTM(sampling_loc.type().is_cuda(), "sampling_loc must be a CUDA tensor");
+-    AT_ASSERTM(attn_weight.type().is_cuda(), "attn_weight must be a CUDA tensor");
++    TORCH_CHECK(value.is_cuda(), "value must be a CUDA tensor");
++    TORCH_CHECK(spatial_shapes.is_cuda(), "spatial_shapes must be a CUDA tensor");
++    TORCH_CHECK(level_start_index.is_cuda(), "level_start_index must be a CUDA tensor");
++    TORCH_CHECK(sampling_loc.is_cuda(), "sampling_loc must be a CUDA tensor");
++    TORCH_CHECK(attn_weight.is_cuda(), "attn_weight must be a CUDA tensor");
+ 
+     const int batch = value.size(0);
+     const int spatial_size = value.size(1);
+@@ -52,7 +52,7 @@
+ 
+     const int im2col_step_ = std::min(batch, im2col_step);
+ 
+-    AT_ASSERTM(batch % im2col_step_ == 0, "batch(%d) must divide im2col_step(%d)", batch, im2col_step_);
++    TORCH_CHECK(batch % im2col_step_ == 0, "batch(%d) must divide im2col_step(%d)", batch, im2col_step_);
+     
+     auto output = at::zeros({batch, num_query, num_heads, channels}, value.options());
+ 
+@@ -64,15 +64,15 @@
+     for (int n = 0; n < batch/im2col_step_; ++n)
+     {
+         auto columns = output_n.select(0, n);
+-        AT_DISPATCH_FLOATING_TYPES(value.type(), "ms_deform_attn_forward_cuda", ([&] {
++        AT_DISPATCH_FLOATING_TYPES(value.scalar_type(), "ms_deform_attn_forward_cuda", ([&] {
+             ms_deformable_im2col_cuda(at::cuda::getCurrentCUDAStream(),
+-                value.data<scalar_t>() + n * im2col_step_ * per_value_size,
+-                spatial_shapes.data<int64_t>(),
+-                level_start_index.data<int64_t>(),
+-                sampling_loc.data<scalar_t>() + n * im2col_step_ * per_sample_loc_size,
+-                attn_weight.data<scalar_t>() + n * im2col_step_ * per_attn_weight_size,
++                value.data_ptr<scalar_t>() + n * im2col_step_ * per_value_size,
++                spatial_shapes.data_ptr<int64_t>(),
++                level_start_index.data_ptr<int64_t>(),
++                sampling_loc.data_ptr<scalar_t>() + n * im2col_step_ * per_sample_loc_size,
++                attn_weight.data_ptr<scalar_t>() + n * im2col_step_ * per_attn_weight_size,
+                 batch_n, spatial_size, num_heads, channels, num_levels, num_query, num_point,
+-                columns.data<scalar_t>());
++                columns.data_ptr<scalar_t>());
+ 
+         }));
+     }
+@@ -94,19 +94,19 @@
+ {
+     const at::cuda::OptionalCUDAGuard device_guard(device_of(value));
+ 
+-    AT_ASSERTM(value.is_contiguous(), "value tensor has to be contiguous");
+-    AT_ASSERTM(spatial_shapes.is_contiguous(), "spatial_shapes tensor has to be contiguous");
+-    AT_ASSERTM(level_start_index.is_contiguous(), "level_start_index tensor has to be contiguous");
+-    AT_ASSERTM(sampling_loc.is_contiguous(), "sampling_loc tensor has to be contiguous");
+-    AT_ASSERTM(attn_weight.is_contiguous(), "attn_weight tensor has to be contiguous");
+-    AT_ASSERTM(grad_output.is_contiguous(), "grad_output tensor has to be contiguous");
++    TORCH_CHECK(value.is_contiguous(), "value tensor has to be contiguous");
++    TORCH_CHECK(spatial_shapes.is_contiguous(), "spatial_shapes tensor has to be contiguous");
++    TORCH_CHECK(level_start_index.is_contiguous(), "level_start_index tensor has to be contiguous");
++    TORCH_CHECK(sampling_loc.is_contiguous(), "sampling_loc tensor has to be contiguous");
++    TORCH_CHECK(attn_weight.is_contiguous(), "attn_weight tensor has to be contiguous");
++    TORCH_CHECK(grad_output.is_contiguous(), "grad_output tensor has to be contiguous");
+ 
+-    AT_ASSERTM(value.type().is_cuda(), "value must be a CUDA tensor");
+-    AT_ASSERTM(spatial_shapes.type().is_cuda(), "spatial_shapes must be a CUDA tensor");
+-    AT_ASSERTM(level_start_index.type().is_cuda(), "level_start_index must be a CUDA tensor");
+-    AT_ASSERTM(sampling_loc.type().is_cuda(), "sampling_loc must be a CUDA tensor");
+-    AT_ASSERTM(attn_weight.type().is_cuda(), "attn_weight must be a CUDA tensor");
+-    AT_ASSERTM(grad_output.type().is_cuda(), "grad_output must be a CUDA tensor");
++    TORCH_CHECK(value.is_cuda(), "value must be a CUDA tensor");
++    TORCH_CHECK(spatial_shapes.is_cuda(), "spatial_shapes must be a CUDA tensor");
++    TORCH_CHECK(level_start_index.is_cuda(), "level_start_index must be a CUDA tensor");
++    TORCH_CHECK(sampling_loc.is_cuda(), "sampling_loc must be a CUDA tensor");
++    TORCH_CHECK(attn_weight.is_cuda(), "attn_weight must be a CUDA tensor");
++    TORCH_CHECK(grad_output.is_cuda(), "grad_output must be a CUDA tensor");
+ 
+     const int batch = value.size(0);
+     const int spatial_size = value.size(1);
+@@ -120,7 +120,7 @@
+ 
+     const int im2col_step_ = std::min(batch, im2col_step);
+ 
+-    AT_ASSERTM(batch % im2col_step_ == 0, "batch(%d) must divide im2col_step(%d)", batch, im2col_step_);
++    TORCH_CHECK(batch % im2col_step_ == 0, "batch(%d) must divide im2col_step(%d)", batch, im2col_step_);
+ 
+     auto grad_value = at::zeros_like(value);
+     auto grad_sampling_loc = at::zeros_like(sampling_loc);
+@@ -135,18 +135,18 @@
+     for (int n = 0; n < batch/im2col_step_; ++n)
+     {
+         auto grad_output_g = grad_output_n.select(0, n);
+-        AT_DISPATCH_FLOATING_TYPES(value.type(), "ms_deform_attn_backward_cuda", ([&] {
++        AT_DISPATCH_FLOATING_TYPES(value.scalar_type(), "ms_deform_attn_backward_cuda", ([&] {
+             ms_deformable_col2im_cuda(at::cuda::getCurrentCUDAStream(),
+-                                    grad_output_g.data<scalar_t>(),
+-                                    value.data<scalar_t>() + n * im2col_step_ * per_value_size,
+-                                    spatial_shapes.data<int64_t>(),
+-                                    level_start_index.data<int64_t>(),
+-                                    sampling_loc.data<scalar_t>() + n * im2col_step_ * per_sample_loc_size,
+-                                    attn_weight.data<scalar_t>() + n * im2col_step_ * per_attn_weight_size,
++                                    grad_output_g.data_ptr<scalar_t>(),
++                                    value.data_ptr<scalar_t>() + n * im2col_step_ * per_value_size,
++                                    spatial_shapes.data_ptr<int64_t>(),
++                                    level_start_index.data_ptr<int64_t>(),
++                                    sampling_loc.data_ptr<scalar_t>() + n * im2col_step_ * per_sample_loc_size,
++                                    attn_weight.data_ptr<scalar_t>() + n * im2col_step_ * per_attn_weight_size,
+                                     batch_n, spatial_size, num_heads, channels, num_levels, num_query, num_point,
+-                                    grad_value.data<scalar_t>() +  n * im2col_step_ * per_value_size,
+-                                    grad_sampling_loc.data<scalar_t>() + n * im2col_step_ * per_sample_loc_size,
+-                                    grad_attn_weight.data<scalar_t>() + n * im2col_step_ * per_attn_weight_size);
++                                    grad_value.data_ptr<scalar_t>() +  n * im2col_step_ * per_value_size,
++                                    grad_sampling_loc.data_ptr<scalar_t>() + n * im2col_step_ * per_sample_loc_size,
++                                    grad_attn_weight.data_ptr<scalar_t>() + n * im2col_step_ * per_attn_weight_size);
+ 
+         }));
+     }
+--- a/models/dino/ops/src/cuda/ms_deform_im2col_cuda.cuh
++++ b/models/dino/ops/src/cuda/ms_deform_im2col_cuda.cuh
+@@ -16,7 +16,7 @@
+ #include <ATen/ATen.h>
+ #include <ATen/cuda/CUDAContext.h>
+ 
+-#include <THC/THCAtomics.cuh>
++#include <ATen/cuda/Atomic.cuh>
+ 
+ #define CUDA_KERNEL_LOOP(i, n)                          \
+   for (int i = blockIdx.x * blockDim.x + threadIdx.x;   \
+--- a/models/dino/ops/src/ms_deform_attn.h
++++ b/models/dino/ops/src/ms_deform_attn.h
+@@ -26,7 +26,7 @@
+     const at::Tensor &attn_weight,
+     const int im2col_step)
+ {
+-    if (value.type().is_cuda())
++    if (value.is_cuda())
+     {
+ #ifdef WITH_CUDA
+         return ms_deform_attn_cuda_forward(
+@@ -48,7 +48,7 @@
+     const at::Tensor &grad_output,
+     const int im2col_step)
+ {
+-    if (value.type().is_cuda())
++    if (value.is_cuda())
+     {
+ #ifdef WITH_CUDA
+         return ms_deform_attn_cuda_backward(
+--- a/tools/analyze_ctc_errors.py
++++ b/tools/analyze_ctc_errors.py
+@@ -179,7 +179,7 @@
+     if cli.new_class_embedding:
+         _adapt_class_head(model, len(dataset.charset), device)
+ 
+-    ckpt = torch.load(cli.checkpoint, map_location="cpu")
++    ckpt = torch.load(cli.checkpoint, map_location="cpu", weights_only=False)
+     ckpt_model = ckpt["model"] if isinstance(ckpt, dict) and "model" in ckpt else ckpt
+     skipped = _load_compatible_state(model, ckpt_model)
+     print(f"Loaded checkpoint with {len(skipped)} skipped keys")
+--- a/tools/analyze_short_blank_margin.py
++++ b/tools/analyze_short_blank_margin.py
+@@ -151,7 +151,7 @@
+     if cli.new_class_embedding:
+         _adapt_class_head(model, len(dataset.charset), device)
+ 
+-    ckpt = torch.load(cli.checkpoint, map_location="cpu")
++    ckpt = torch.load(cli.checkpoint, map_location="cpu", weights_only=False)
+     ckpt_model = ckpt["model"] if isinstance(ckpt, dict) and "model" in ckpt else ckpt
+     skipped = _load_compatible_state(model, ckpt_model)
+     print(f"Loaded checkpoint with {len(skipped)} skipped keys")
+--- a/tools/diagnose_boxes.py
++++ b/tools/diagnose_boxes.py
+@@ -285,7 +285,7 @@
+     if cli.new_class_embedding:
+         adapt_class_head(model, len(dataset.charset), device)
+ 
+-    checkpoint = torch.load(checkpoint_path, map_location="cpu")
++    checkpoint = torch.load(checkpoint_path, map_location="cpu", weights_only=False)
+     checkpoint_model = checkpoint["model"] if isinstance(checkpoint, dict) and "model" in checkpoint else checkpoint
+     skipped = load_compatible_state(model, checkpoint_model)
+ 
+--- a/tools/eval_chinese_micro.py
++++ b/tools/eval_chinese_micro.py
+@@ -83,7 +83,7 @@
+         if cli.new_label_enc:
+             model.label_enc = nn.Embedding(len(dataset.charset) + 1, features_dim).to(device)
+ 
+-    checkpoint = torch.load(cli.weights, map_location="cpu")
++    checkpoint = torch.load(cli.weights, map_location="cpu", weights_only=False)
+     ckpt_model = checkpoint["model"] if isinstance(checkpoint, dict) and "model" in checkpoint else checkpoint
+     _load_compatible_weights(model, ckpt_model)
+     model.eval()
+--- a/tools/eval_ctc_micro_batch.py
++++ b/tools/eval_ctc_micro_batch.py
+@@ -170,7 +170,7 @@
+     if cli.new_class_embedding:
+         _adapt_class_head(model, len(dataset.charset), device)
+ 
+-    ckpt = torch.load(cli.checkpoint, map_location="cpu")
++    ckpt = torch.load(cli.checkpoint, map_location="cpu", weights_only=False)
+     ckpt_model = ckpt["model"] if isinstance(ckpt, dict) and "model" in ckpt else ckpt
+     skipped = _load_compatible_state(model, ckpt_model)
+     model.to(device)
+--- a/tools/evaluate_short_rescue.py
++++ b/tools/evaluate_short_rescue.py
+@@ -150,7 +150,7 @@
+     if cli.new_class_embedding:
+         _adapt_class_head(model, len(dataset.charset), device)
+ 
+-    ckpt = torch.load(cli.checkpoint, map_location="cpu")
++    ckpt = torch.load(cli.checkpoint, map_location="cpu", weights_only=False)
+     ckpt_model = ckpt["model"] if isinstance(ckpt, dict) and "model" in ckpt else ckpt
+     skipped = _load_compatible_state(model, ckpt_model)
+     print(f"Loaded checkpoint with {len(skipped)} skipped keys")
+--- a/tools/make_qualitative_comparison_figures.py
++++ b/tools/make_qualitative_comparison_figures.py
+@@ -108,7 +108,7 @@
+     args.charset = dataset.charset
+     model, criterion, _ = build_model_main(args)
+     adapt_class_head(model, len(dataset.charset), device)
+-    ckpt = torch.load(checkpoint, map_location="cpu")
++    ckpt = torch.load(checkpoint, map_location="cpu", weights_only=False)
+     state = ckpt["model"] if isinstance(ckpt, dict) and "model" in ckpt else ckpt
+     clean_state = utils.clean_state_dict(state)
+     model_state = model.state_dict()
+--- a/tools/repro_msda_dump.py
++++ b/tools/repro_msda_dump.py
+@@ -31,7 +31,7 @@
+     parser.add_argument("--im2col_step", default=64, type=int)
+     args = parser.parse_args()
+ 
+-    payload = torch.load(args.dump, map_location="cpu")
++    payload = torch.load(args.dump, map_location="cpu", weights_only=False)
+     value = payload["value"].to(args.device)
+     spatial_shapes = payload["spatial_shapes"].to(args.device)
+     level_start_index = payload["level_start_index"].to(args.device)
+--- a/tools/sweep_ctc_decode_bias.py
++++ b/tools/sweep_ctc_decode_bias.py
+@@ -229,7 +229,7 @@
+     if cli.new_class_embedding:
+         _adapt_class_head(model, len(dataset.charset), device)
+ 
+-    ckpt = torch.load(cli.checkpoint, map_location="cpu")
++    ckpt = torch.load(cli.checkpoint, map_location="cpu", weights_only=False)
+     ckpt_model = ckpt["model"] if isinstance(ckpt, dict) and "model" in ckpt else ckpt
+     skipped = _load_compatible_state(model, ckpt_model)
+     print(f"Loaded checkpoint with {len(skipped)} skipped keys")
+--- a/tools/visualize_ctc_by_length.py
++++ b/tools/visualize_ctc_by_length.py
+@@ -243,7 +243,7 @@
+     if cli.new_class_embedding:
+         adapt_class_head(model, len(dataset.charset), device)
+ 
+-    ckpt = torch.load(cli.checkpoint, map_location="cpu")
++    ckpt = torch.load(cli.checkpoint, map_location="cpu", weights_only=False)
+     ckpt_model = ckpt["model"] if isinstance(ckpt, dict) and "model" in ckpt else ckpt
+     skipped = load_compatible_state(model, ckpt_model)
+ 

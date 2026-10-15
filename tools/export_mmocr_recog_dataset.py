@@ -46,6 +46,17 @@ def parse_args():
         help="Dataset preset to export.",
     )
     parser.add_argument(
+        "--name",
+        default=None,
+        help="Custom export name. Must be used together with --roots.",
+    )
+    parser.add_argument(
+        "--roots",
+        nargs="+",
+        default=None,
+        help="Custom processed dataset roots under --data-root.",
+    )
+    parser.add_argument(
         "--labels-file",
         default="labels.pkl",
         help="Label pickle name inside each processed dataset root.",
@@ -144,6 +155,21 @@ def export_dataset(name, roots, args):
             json.dump(payload, handle, ensure_ascii=False, indent=args.indent)
             handle.write("\n")
 
+    all_records = [
+        record
+        for split in SPLIT_TO_FILE
+        for record in split_records[split]
+    ]
+    all_filename = "textrecog_all.json"
+    with (output_dir / all_filename).open("w", encoding="utf-8") as handle:
+        json.dump(
+            {"metainfo": metainfo, "data_list": all_records},
+            handle,
+            ensure_ascii=False,
+            indent=args.indent,
+        )
+        handle.write("\n")
+
     charset_path = output_dir / "charset.txt"
     with charset_path.open("w", encoding="utf-8") as handle:
         for char in sorted(charset):
@@ -158,6 +184,8 @@ def export_dataset(name, roots, args):
             split: (output_dir / filename).as_posix()
             for split, filename in SPLIT_TO_FILE.items()
         },
+        "all_annotation_file": (output_dir / all_filename).as_posix(),
+        "all_count": len(all_records),
         "counts": {split: len(records) for split, records in split_records.items()},
         "source_counts": split_sources,
         "charset_file": charset_path.as_posix(),
@@ -184,10 +212,18 @@ def selected_presets(preset):
     return [(preset, PRESETS[preset])]
 
 
+def selected_exports(args):
+    if (args.name is None) != (args.roots is None):
+        raise ValueError("--name and --roots must be provided together")
+    if args.name is not None:
+        return [(args.name, args.roots)]
+    return selected_presets(args.preset)
+
+
 def main():
     args = parse_args()
     summaries = []
-    for name, roots in selected_presets(args.preset):
+    for name, roots in selected_exports(args):
         summaries.append(export_dataset(name, roots, args))
     for summary in summaries:
         print(

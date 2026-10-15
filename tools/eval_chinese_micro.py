@@ -83,7 +83,7 @@ def load_model(model, dataset, args_dataset, cli):
         if cli.new_label_enc:
             model.label_enc = nn.Embedding(len(dataset.charset) + 1, features_dim).to(device)
 
-    checkpoint = torch.load(cli.weights, map_location="cpu")
+    checkpoint = torch.load(cli.weights, map_location="cpu", weights_only=False)
     ckpt_model = checkpoint["model"] if isinstance(checkpoint, dict) and "model" in checkpoint else checkpoint
     _load_compatible_weights(model, ckpt_model)
     model.eval()

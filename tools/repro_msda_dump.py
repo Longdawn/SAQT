@@ -31,7 +31,7 @@ def main():
     parser.add_argument("--im2col_step", default=64, type=int)
     args = parser.parse_args()
 
-    payload = torch.load(args.dump, map_location="cpu")
+    payload = torch.load(args.dump, map_location="cpu", weights_only=False)
     value = payload["value"].to(args.device)
     spatial_shapes = payload["spatial_shapes"].to(args.device)
     level_start_index = payload["level_start_index"].to(args.device)

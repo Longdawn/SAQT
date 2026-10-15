@@ -18,10 +18,12 @@ class MTHCombo(Dataset):
             raise ValueError("mth_combo_roots and mth_combo_raw_roots must have equal length")
 
         self.datasets = []
-        for root, raw_root in zip(roots, raw_roots):
+        base_fraction_seed = int(getattr(args, "mth1000_train_fraction_seed", 42))
+        for dataset_index, (root, raw_root) in enumerate(zip(roots, raw_roots)):
             child_args = copy.copy(args)
             child_args.mth1000_root = root
             child_args.mth1000_raw_root = raw_root
+            child_args.mth1000_train_fraction_seed = base_fraction_seed + dataset_index
             self.datasets.append(MTH1000(mode, transform, args=child_args))
 
         self.samples = []
@@ -34,6 +36,17 @@ class MTHCombo(Dataset):
         self.charset = sorted(charset)
         for dataset in self.datasets:
             dataset.charset = self.charset
+
+        fraction_manifests = [
+            dataset.train_fraction_manifest
+            for dataset in self.datasets
+            if getattr(dataset, "train_fraction_manifest", None) is not None
+        ]
+        self.train_fraction_manifest = (
+            {"strategy": "per_child_deterministic", "children": fraction_manifests}
+            if fraction_manifests
+            else None
+        )
 
         self.cumulative_sizes = []
         total = 0

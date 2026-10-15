@@ -3,6 +3,7 @@ import unittest
 from unittest import mock
 
 from datasets import MTHCombo as mth_combo_module
+from datasets.MTH1000 import sample_id_fingerprint, select_train_fraction_indices
 
 
 class _FakeMTH1000:
@@ -41,6 +42,45 @@ class MTHComboDatasetTest(unittest.TestCase):
         self.assertEqual(dataset[0]["id"], "alpha-0")
         self.assertEqual(dataset[2]["id"], "beta-0")
         self.assertEqual(dataset[3]["id"], "beta-1")
+
+    def test_fraction_indices_are_stable_and_source_ordered(self):
+        first = select_train_fraction_indices(20, 0.25, 17)
+        second = select_train_fraction_indices(20, 0.25, 17)
+
+        self.assertEqual(first, second)
+        self.assertEqual(len(first), 5)
+        self.assertEqual(first, sorted(first))
+        self.assertNotEqual(first, select_train_fraction_indices(20, 0.25, 18))
+
+    def test_fraction_validation_and_fingerprint(self):
+        with self.assertRaises(ValueError):
+            select_train_fraction_indices(10, 0.0, 42)
+        with self.assertRaises(ValueError):
+            select_train_fraction_indices(10, 1.1, 42)
+
+        samples = [{"id": "a"}, {"id": "b"}]
+        self.assertEqual(sample_id_fingerprint(samples), sample_id_fingerprint(samples))
+        self.assertNotEqual(
+            sample_id_fingerprint(samples), sample_id_fingerprint(list(reversed(samples)))
+        )
+
+    def test_anchor_fraction_preserves_existing_subset_and_nests_larger_subsets(self):
+        num_samples = 101
+        seed = 20260718
+        original_ten = select_train_fraction_indices(num_samples, 0.10, seed)
+        anchored_ten = select_train_fraction_indices(num_samples, 0.10, seed, 0.10)
+        anchored_twenty_five = select_train_fraction_indices(
+            num_samples, 0.25, seed, 0.10
+        )
+        anchored_fifty = select_train_fraction_indices(num_samples, 0.50, seed, 0.10)
+
+        self.assertEqual(original_ten, anchored_ten)
+        self.assertTrue(set(anchored_ten) < set(anchored_twenty_five))
+        self.assertTrue(set(anchored_twenty_five) < set(anchored_fifty))
+        self.assertEqual(anchored_twenty_five, sorted(anchored_twenty_five))
+
+        with self.assertRaises(ValueError):
+            select_train_fraction_indices(num_samples, 0.25, seed, 0.0)
 
 
 if __name__ == "__main__":

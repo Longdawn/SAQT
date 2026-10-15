@@ -1,0 +1,89 @@
+{
+  "source_root": "/home/ubuntu/DTLR",
+  "assets": [
+    {
+      "path": "data/tkhmth2200_mth1000_dtlr",
+      "kind": "directory"
+    },
+    {
+      "path": "data/tkhmth2200_mth1200_dtlr",
+      "kind": "directory"
+    },
+    {
+      "path": "data/tkhmth2200_tkh_dtlr",
+      "kind": "directory"
+    },
+    {
+      "path": "data/hdrc_dtlr",
+      "kind": "directory"
+    },
+    {
+      "path": "data/TKHMTH2200/MTH1000/label_char",
+      "kind": "directory"
+    },
+    {
+      "path": "data/TKHMTH2200/MTH1000/label_textline",
+      "kind": "directory"
+    },
+    {
+      "path": "data/TKHMTH2200/MTH1200/label_char",
+      "kind": "directory"
+    },
+    {
+      "path": "data/TKHMTH2200/MTH1200/label_textline",
+      "kind": "directory"
+    },
+    {
+      "path": "data/TKHMTH2200/TKH/label_char",
+      "kind": "directory"
+    },
+    {
+      "path": "data/TKHMTH2200/TKH/label_textline",
+      "kind": "directory"
+    },
+    {
+      "path": "logs/mth1000_mth1200_stage1_0512-1755/checkpoint.pth",
+      "kind": "file",
+      "bytes": 625025964,
+      "sha256": "9b9630fad008cac185aaabbe005873707b492604ce2b447710722dcbf309bc42"
+    },
+    {
+      "path": "logs/mth1000_mth1200_stage1_0512-1755/charset.pkl",
+      "kind": "file",
+      "bytes": 40597,
+      "sha256": "410ba7200a7added1f17356425391b5aadb727bb528077652d3aa78181c9747b"
+    },
+    {
+      "path": "logs/mth1000_mth1200_stage1_0512-1755/charset.json",
+      "kind": "file",
+      "bytes": 60671,
+      "sha256": "a275f465c83feb4d1775d4af019f26cc65ecb2a907bbbc6ec9b5c1b277031719"
+    },
+    {
+      "path": "logs/mth1000_mth1200_stage1_0512-1755/config_args_all.json",
+      "kind": "file",
+      "bytes": 4429,
+      "sha256": "9e2eb8f959b47720e886c0035068d309e8b851cd717126e8958e7613550545d2"
+    },
+    {
+      "path": "data/tkhmth2200_mth1000_dtlr/labels.pkl",
+      "kind": "verify-only",
+      "sha256": "07cf84d819be5d2a05b9d3f140c29e5e947533d6aa9c7c668c5efc30795ecc35"
+    },
+    {
+      "path": "data/tkhmth2200_mth1200_dtlr/labels.pkl",
+      "kind": "verify-only",
+      "sha256": "ca4d9305a61ae8f74ac3dbabcd9b9fcc7e659e82fb2a4d003f4859e81dccba45"
+    },
+    {
+      "path": "data/tkhmth2200_tkh_dtlr/labels.pkl",
+      "kind": "verify-only",
+      "sha256": "55f00deaf0f1b5b828ae8c0f83f2a741019185f98125a768b9603f2f59dae068"
+    },
+    {
+      "path": "data/hdrc_dtlr/labels.pkl",
+      "kind": "verify-only",
+      "sha256": "7debc53b3d0bd315d7ecc6ce6174bb25b8f70dd445eba802087e385ced1af139"
+    }
+  ]
+}

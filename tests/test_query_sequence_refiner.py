@@ -71,6 +71,48 @@ class QuerySequenceRefinerTest(unittest.TestCase):
         self.assertEqual(outputs["pred_sorted_ctc_logits"].shape, outputs["pred_logits"].shape)
         self.assertEqual(outputs["pred_logits"].shape[:2], outputs["pred_boxes"].shape[:2])
 
+    def test_vertical_geometry_adapter_is_exact_identity_at_zero_start(self):
+        adapter = self.dino_tool.VerticalGeometryQueryAdapter(
+            hidden_dim=16,
+            geometry_hidden_dim=8,
+            init_scale=0.0,
+        )
+        query_feats = torch.randn(2, 5, 16)
+        sorted_boxes = torch.rand(2, 5, 4)
+        sorted_boxes[:, :, 1], _ = torch.sort(sorted_boxes[:, :, 1], dim=1)
+        adapted = adapter(query_feats, sorted_boxes, axis=1)
+        self.assertTrue(torch.equal(adapted, query_feats))
+
+    def test_model_with_vertical_geometry_adapter_emits_sorted_ctc_logits(self):
+        model = self._build_fake_dino(
+            use_query_sequence_refiner=False,
+            use_vertical_geometry_adapter=True,
+        )
+        samples = NestedTensor(
+            torch.randn(2, 3, 8, 8),
+            torch.zeros(2, 8, 8, dtype=torch.bool),
+        )
+        outputs = model(samples)
+        self.assertTrue(model.use_vertical_geometry_adapter)
+        self.assertIn("pred_sorted_ctc_logits", outputs)
+        self.assertEqual(outputs["pred_sorted_ctc_logits"].shape, outputs["pred_logits"].shape)
+
+    def test_model_with_ctc_length_calibration_emits_initialized_length(self):
+        model = self._build_fake_dino(
+            use_query_sequence_refiner=False,
+            use_ctc_length_calibration=True,
+        )
+        samples = NestedTensor(
+            torch.randn(2, 3, 8, 8),
+            torch.zeros(2, 8, 8, dtype=torch.bool),
+        )
+        outputs = model(samples)
+        self.assertIn("pred_log_length", outputs)
+        torch.testing.assert_close(
+            torch.expm1(outputs["pred_log_length"]),
+            torch.full((2,), 8.0),
+        )
+
     def test_loss_ctc_uses_sorted_ctc_logits_when_available(self):
         criterion = self.dino_tool.SetCriterion(
             num_classes=2,
@@ -105,6 +147,8 @@ class QuerySequenceRefinerTest(unittest.TestCase):
         use_sorted_ctc_refiner=False,
         sorted_ctc_refiner_layers=1,
         sorted_ctc_refiner_kernel=3,
+        use_vertical_geometry_adapter=False,
+        use_ctc_length_calibration=False,
     ):
         class FakeDecoderLayer(nn.Module):
             def __init__(self):
@@ -166,6 +210,9 @@ class QuerySequenceRefinerTest(unittest.TestCase):
             use_sorted_ctc_refiner=use_sorted_ctc_refiner,
             sorted_ctc_refiner_layers=sorted_ctc_refiner_layers,
             sorted_ctc_refiner_kernel=sorted_ctc_refiner_kernel,
+            use_vertical_geometry_adapter=use_vertical_geometry_adapter,
+            use_ctc_length_calibration=use_ctc_length_calibration,
+            ctc_length_init=8.0,
         )
 
 
@@ -184,6 +231,16 @@ class QuerySequenceRefinerConfigSmokeTest(unittest.TestCase):
         self.assertEqual(config.sorted_ctc_refiner_axis, 1)
         self.assertEqual(config.sorted_ctc_refiner_layers, 1)
         self.assertEqual(config.sorted_ctc_refiner_kernel, 3)
+        self.assertEqual(config.forced_direction, "vertical")
+
+    def test_mthv2_vertical_geometry_adapter_probe_config(self):
+        config = load_module(
+            ROOT / "config" / "MTHV2_dtlr_vertical_geometry_adapter_probe.py"
+        )
+        self.assertTrue(config.use_vertical_geometry_adapter)
+        self.assertEqual(config.vertical_geometry_adapter_axis, 1)
+        self.assertEqual(config.vertical_geometry_adapter_hidden_dim, 64)
+        self.assertEqual(config.vertical_geometry_adapter_init_scale, 0.0)
         self.assertEqual(config.forced_direction, "vertical")
 
 

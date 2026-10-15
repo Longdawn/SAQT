@@ -6,6 +6,7 @@ import argparse
 import ast
 import datetime
 import json
+import math
 import random
 import time
 from pathlib import Path
@@ -109,6 +110,54 @@ def _restore_requires_grad(model, previous_requires_grad):
     for name, parameter in model.named_parameters():
         if name in previous_requires_grad:
             parameter.requires_grad_(previous_requires_grad[name])
+
+
+def _best_cer_from_log(log_path):
+    best_cer = float("inf")
+    log_path = Path(log_path)
+    if not log_path.is_file():
+        return best_cer
+
+    with log_path.open("r", encoding="utf-8") as stream:
+        for line in stream:
+            try:
+                record = json.loads(line)
+            except (TypeError, ValueError):
+                continue
+            for key in ("test_cer_oracle_direction", "test_cer"):
+                value = record.get(key)
+                if isinstance(value, (int, float)) and math.isfinite(float(value)):
+                    best_cer = min(best_cer, float(value))
+    return best_cer
+
+
+def _resolve_resume_progress(
+    checkpoint,
+    resume_from_output_checkpoint,
+    new_class_embedding,
+    log_path,
+):
+    checkpoint = checkpoint if isinstance(checkpoint, dict) else {}
+    global_step = int(checkpoint.get("global_step", 0))
+
+    if resume_from_output_checkpoint and "epoch" in checkpoint:
+        start_epoch = int(checkpoint["epoch"]) + 1
+    elif new_class_embedding:
+        start_epoch = 0
+    elif "epoch" in checkpoint:
+        start_epoch = int(checkpoint["epoch"]) + 1
+    else:
+        start_epoch = 0
+
+    best_cer = float("inf")
+    if resume_from_output_checkpoint:
+        stored_best = checkpoint.get("best_cer")
+        if isinstance(stored_best, (int, float)) and math.isfinite(float(stored_best)):
+            best_cer = float(stored_best)
+        else:
+            best_cer = _best_cer_from_log(log_path)
+
+    return start_epoch, global_step, best_cer
 
 
 def get_args_parser():
@@ -454,6 +503,12 @@ def main(args):
 
     dataset_train = build_dataset(image_set="train", args=args)
     dataset_val = build_dataset(image_set="val", args=args)
+    train_fraction_manifest = getattr(dataset_train, "train_fraction_manifest", None)
+    if train_fraction_manifest is not None:
+        logger.info(
+            "train_fraction_manifest:\n"
+            + json.dumps(train_fraction_manifest, ensure_ascii=False, indent=2)
+        )
 
     if args.distributed:
         sampler_train = DistributedSampler(dataset_train)
@@ -663,7 +718,7 @@ def main(args):
         base_ds = get_coco_api_from_dataset(dataset_val)
 
     if args.frozen_weights is not None:
-        checkpoint = torch.load(args.frozen_weights, map_location="cpu")
+        checkpoint = torch.load(args.frozen_weights, map_location="cpu", weights_only=False)
 
         model_without_ddp.detr.load_state_dict(checkpoint["model"])
 
@@ -684,15 +739,19 @@ def main(args):
         if len(skipped) > 0:
             logger.info(f"Skipped {len(skipped)} incompatible keys during load.")
 
-    if os.path.exists(os.path.join(args.output_dir, "checkpoint.pth")):
-        args.resume = os.path.join(args.output_dir, "checkpoint.pth")
+    output_checkpoint_path = os.path.join(args.output_dir, "checkpoint.pth")
+    resume_from_output_checkpoint = bool(
+        args.output_dir and os.path.isfile(output_checkpoint_path)
+    )
+    if resume_from_output_checkpoint:
+        args.resume = output_checkpoint_path
     if args.resume:
         if args.resume.startswith("https"):
             checkpoint = torch.hub.load_state_dict_from_url(
                 args.resume, map_location="cpu", check_hash=True
             )
         else:
-            checkpoint = torch.load(args.resume, map_location="cpu")
+            checkpoint = torch.load(args.resume, map_location="cpu", weights_only=False)
 
         _load_compatible_state(model_without_ddp, checkpoint["model"])
         if args.use_ema:
@@ -846,11 +905,11 @@ def main(args):
                     args.resume, map_location="cpu", check_hash=True
                 )
             else:
-                checkpoint = torch.load(args.resume, map_location="cpu")
+                checkpoint = torch.load(args.resume, map_location="cpu", weights_only=False)
             _load_compatible_state(model_without_ddp, checkpoint["model"])
 
     if (not args.resume) and args.pretrain_model_path:
-        checkpoint_full = torch.load(args.pretrain_model_path, map_location="cpu")
+        checkpoint_full = torch.load(args.pretrain_model_path, map_location="cpu", weights_only=False)
         checkpoint = checkpoint_full["model"]
         # `pretrain_model_path` is used for weight initialization only.
         # Do not inherit the source checkpoint epoch into a new finetuning run.
@@ -892,6 +951,23 @@ def main(args):
     # Optimizer can be rebuilt in new_class_embedding branches above.
     # Always build scheduler after optimizer is finalized.
     lr_scheduler = _build_scheduler(optimizer)
+    if resume_from_output_checkpoint:
+        missing_training_state = [
+            key
+            for key in ("optimizer", "lr_scheduler")
+            if key not in checkpoint
+        ]
+        if missing_training_state:
+            raise RuntimeError(
+                "Exact output-directory resume requires checkpoint training state: "
+                + ", ".join(missing_training_state)
+            )
+        optimizer.load_state_dict(checkpoint["optimizer"])
+        lr_scheduler.load_state_dict(checkpoint["lr_scheduler"])
+        logger.info(
+            "Restored optimizer and lr_scheduler from "
+            f"{output_checkpoint_path}"
+        )
 
     if args.eval:
         run = wandb.init(project="OCRDETR-general-CTC", config=args, mode="disabled")
@@ -923,17 +999,46 @@ def main(args):
 
         return
 
+    structure_teacher = None
+    structure_retention_coef = float(
+        getattr(args, "query_geometry_retention_coef", 0.0)
+    )
+    if structure_retention_coef > 0.0:
+        teacher_path = getattr(args, "query_geometry_teacher_checkpoint", None)
+        if not teacher_path:
+            raise ValueError(
+                "query_geometry_teacher_checkpoint is required when "
+                "query_geometry_retention_coef > 0"
+            )
+        teacher_checkpoint = torch.load(teacher_path, map_location="cpu", weights_only=False)
+        structure_teacher = copy.deepcopy(model_without_ddp)
+        _load_compatible_state(structure_teacher, teacher_checkpoint["model"])
+        structure_teacher.to(device)
+        structure_teacher.eval()
+        for parameter in structure_teacher.parameters():
+            parameter.requires_grad_(False)
+        logger.info(
+            "Enabled query geometry retention: "
+            f"teacher={teacher_path}, coef={structure_retention_coef}, "
+            "axes=(vertical_center,height)"
+        )
+
     # model.class_embed = new_class_embed
 
     print("Start training")
-    best_cer = float("inf")
-    if args.new_class_embedding:
-        args.start_epoch = 0
-    elif "checkpoint" in locals() and isinstance(checkpoint, dict) and "epoch" in checkpoint:
-        args.start_epoch = checkpoint["epoch"] + 1
-    global_step = 0
-    if "checkpoint" in locals() and isinstance(checkpoint, dict):
-        global_step = int(checkpoint.get("global_step", 0))
+    checkpoint_for_progress = checkpoint if "checkpoint" in locals() else None
+    args.start_epoch, global_step, best_cer = _resolve_resume_progress(
+        checkpoint_for_progress,
+        resume_from_output_checkpoint,
+        args.new_class_embedding,
+        output_dir / "log.txt",
+    )
+    if resume_from_output_checkpoint:
+        logger.info(
+            "Exact resume progress: "
+            f"start_epoch={args.start_epoch}, global_step={global_step}, "
+            f"best_cer={best_cer}"
+        )
 
     exact_checkpoint_steps = sorted(
         {int(step) for step in getattr(args, "exact_checkpoint_steps", [])}
@@ -976,6 +1081,7 @@ def main(args):
             "lr_scheduler": lr_scheduler.state_dict(),
             "epoch": epoch,
             "global_step": int(global_step_value),
+            "best_cer": float(best_cer),
             "args": args,
         }
         if args.use_ema:
@@ -1065,6 +1171,7 @@ def main(args):
             run=run,
             global_step_start=global_step,
             step_callback=_after_step,
+            structure_teacher=structure_teacher,
         )
 
         if epoch % args.eval_epoch == 0:

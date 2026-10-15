@@ -1,41 +1,40 @@
-# Python caches
-__pycache__/
-*.py[cod]
-
-# Virtual environments
-DTLR/
-.venv/
-venv/
-env/
-
-# Build artifacts
-build/
-dist/
-*.egg-info/
-*.so
-
-# IDE / OS
-.vscode/
-.DS_Store
-
-# Large local assets
-data/
-logs/
-log/
-debug_vis/
-stats_dect/
-check/
-
-# Local papers / notes
-*.pdf
-*.docx
-
-# Model weights
+# Datasets, checkpoints and generated experiment artifacts
+/data/
+/logs/
+/debug_vis/
+/migration_reports/
+/migration/reference/
+/text_renderer/
+/.torch_cache/
 *.pth
 *.pt
 *.ckpt
-
-# Local auxiliary workspaces
-PyLaia-examples/
-codex_skills/
-text_renderer/
+*.pkl
+*.pickle
+*.zip
+*.tar
+*.tar.gz
+*.pdf
+*.docx
+*.so
+*.o
+*.obj
+__pycache__/
+*.py[cod]
+build/
+dist/
+*.egg-info/
+.venv/
+venv/
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+id_rsa*
+id_ed25519*
+.vscode/
+.idea/
+.DS_Store
+.pytest_cache/
+*.migration-part-*

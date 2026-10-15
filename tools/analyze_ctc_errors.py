@@ -179,7 +179,7 @@ def main():
     if cli.new_class_embedding:
         _adapt_class_head(model, len(dataset.charset), device)
 
-    ckpt = torch.load(cli.checkpoint, map_location="cpu")
+    ckpt = torch.load(cli.checkpoint, map_location="cpu", weights_only=False)
     ckpt_model = ckpt["model"] if isinstance(ckpt, dict) and "model" in ckpt else ckpt
     skipped = _load_compatible_state(model, ckpt_model)
     print(f"Loaded checkpoint with {len(skipped)} skipped keys")

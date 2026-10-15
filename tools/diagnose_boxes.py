@@ -285,7 +285,7 @@ def main():
     if cli.new_class_embedding:
         adapt_class_head(model, len(dataset.charset), device)
 
-    checkpoint = torch.load(checkpoint_path, map_location="cpu")
+    checkpoint = torch.load(checkpoint_path, map_location="cpu", weights_only=False)
     checkpoint_model = checkpoint["model"] if isinstance(checkpoint, dict) and "model" in checkpoint else checkpoint
     skipped = load_compatible_state(model, checkpoint_model)
 
